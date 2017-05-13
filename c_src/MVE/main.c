@@ -88,6 +88,23 @@ double Qfield_y(double x, double y)
     return  x/(2*M_PI*fmax(r,0.001));
 }
 
+double Pfield_x(double x, double y)
+{
+    double r = sqrt(x*x+y*y);
+    if(r == 0)
+        return 0;
+    return x/r*exp(-r);
+}
+
+double Pfield_y(double x, double y)
+{
+    double r = sqrt(x*x+y*y);
+    if(r == 0)
+        return 0;
+    return y/r*exp(-r);
+}
+
+
 double Mfield(double x, double y)
 {
     double r2= x*x+y*y;
@@ -107,8 +124,8 @@ int VortexInBody(double x, double y)
 
 int main(int argc, char *argv[])
 {
-    int Np = 40, MaxVortexes = 6000, Niterations = 100,      i,j,k, iterator;
-    double nu = 0.0001, tau = 0.001, eps = 0.002, rho = 1.;
+    int Np = 40, MaxVortexes = 6000, Niterations = 120,      i,j,k, iterator;
+    double nu = 0.0001, tau = 0.001, eps = 0.0001, rho = 1.;
     double vx_inf = 1., vy_inf = 0.;
 
     double  PanelNodes [Np][2],
@@ -243,10 +260,10 @@ int main(int argc, char *argv[])
             {
                 if( InFlow[j].active==1 )
                 {
-                    I2_x -= InFlow[j].vorticity*Qfield_x(InFlow[i].x-InFlow[j].x,InFlow[i].y-InFlow[j].y);
-                    I2_y -= InFlow[j].vorticity*Qfield_y(InFlow[i].x-InFlow[j].x,InFlow[i].y-InFlow[j].y);
+                    I2_x -= InFlow[j].vorticity*Pfield_x((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
+                    I2_y -= InFlow[j].vorticity*Pfield_y((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
                     I1 += InFlow[j].vorticity*exp(-sqrt((InFlow[i].x-InFlow[j].x)*(InFlow[i].x-InFlow[j].x)
-                                                        +(InFlow[i].y-InFlow[j].y)*(InFlow[i].y-InFlow[j].y))/eps);
+                                                       +(InFlow[i].y-InFlow[j].y)*(InFlow[i].y-InFlow[j].y))/eps);
                 }
             }
             I0 = 2*M_PI*eps*eps;
@@ -255,9 +272,9 @@ int main(int argc, char *argv[])
                 if( InFlow[j].active==1 )
                 {
                     I3_x += PanelNorms[j][0]*exp(-sqrt((InFlow[i].x-PanelMids[j][0])*(InFlow[i].x-PanelMids[j][0])
-                            +(InFlow[i].y-PanelMids[j][1])*(InFlow[i].y-PanelMids[j][1])));
+                            +(InFlow[i].y-PanelMids[j][1])*(InFlow[i].y-PanelMids[j][1]))/eps)*PanelLength[j];
                     I3_y += PanelNorms[j][1]*exp(-sqrt((InFlow[i].x-PanelMids[j][0])*(InFlow[i].x-PanelMids[j][0])
-                            +(InFlow[i].y-PanelMids[j][1])*(InFlow[i].y-PanelMids[j][1])));
+                            +(InFlow[i].y-PanelMids[j][1])*(InFlow[i].y-PanelMids[j][1]))/eps)*PanelLength[j];
                     I0 += ((InFlow[i].x-PanelMids[j][0])*PanelNorms[j][0]+(InFlow[i].y-PanelMids[j][1])*PanelNorms[j][1])
                             *PanelLength[j]*Mfield((InFlow[i].x-PanelMids[j][0])/eps,(InFlow[i].y-PanelMids[j][1])/eps);
                 }
