@@ -79,13 +79,13 @@ typedef struct Vortex
 double Qfield_x(double x, double y)
 {
     double r = x*x+y*y;
-    return -y/(2*M_PI*fmax(r,0.001));
+    return -y/(2*M_PI*fmax(r,0.000001));
 }
 
 double Qfield_y(double x, double y)
 {
     double r = x*x+y*y;
-    return  x/(2*M_PI*fmax(r,0.001));
+    return x/(2*M_PI*fmax(r,0.000001));
 }
 
 double Pfield_x(double x, double y)
@@ -122,10 +122,30 @@ int VortexInBody(double x, double y)
         return 0;
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
-    int Np = 40, MaxVortexes = 6000, Niterations = 120,      i,j,k, iterator;
-    double nu = 0.0001, tau = 0.001, eps = 0.0001, rho = 1.;
+    /*
+     * ToDo:
+     *
+     * Добавить вычисление силовых параметров и вывод по ходу вычислений
+     * Построить график силовых воздействий от времени
+     *
+     * Добавить усреднитель вихревого поля (дополнительный вид отрисовки)
+     *  (разбиение сетки NxN внутри которого производится суммирование и вихрей к площади)
+     *
+     * Провести долгосрочный анализ
+     *
+     * Добавить отрисовку в живом времени (или буфер через файл)
+     *
+     *
+     *( с текущими параметрами работает до 150 итераций )
+     */
+    omp_set_dynamic(1);
+    omp_set_num_threads(8);
+
+
+    int Np = 40, MaxVortexes = 16500, Niterations = atoi(argv[1]),      i,j,k, iterator;
+    double nu = 0.0001, tau = 0.01, eps = 0.000001/*, rho = 1.*/;
     double vx_inf = 1., vy_inf = 0.;
 
     double  PanelNodes [Np][2],
@@ -165,8 +185,8 @@ int main(int argc, char *argv[])
                                    PanelTaus[i][1]*PanelTaus[i][1]);
             PanelTaus[i][0] /= PanelLength[i];
             PanelTaus[i][1] /= PanelLength[i];
-            PanelNorms[i][0] = -PanelTaus[i][1];
-            PanelNorms[i][1] =  PanelTaus[i][0];
+            PanelNorms[i][0] =  PanelTaus[i][1];
+            PanelNorms[i][1] = -PanelTaus[i][0];
         }
         PanelMids[Np-1][0] = (PanelNodes[Np-1][0]+PanelNodes[0][0])/2;
         PanelMids[Np-1][1] = (PanelNodes[Np-1][1]+PanelNodes[0][1])/2;
@@ -176,9 +196,15 @@ int main(int argc, char *argv[])
                                PanelTaus[Np-1][1]*PanelTaus[Np-1][1]);
         PanelTaus[Np-1][0] /= PanelLength[Np-1];
         PanelTaus[Np-1][1] /= PanelLength[Np-1];
-        PanelNorms[Np-1][0] = -PanelTaus[Np-1][1];
-        PanelNorms[Np-1][1] =  PanelTaus[Np-1][0];
+        PanelNorms[Np-1][0] =  PanelTaus[Np-1][1];
+        PanelNorms[Np-1][1] = -PanelTaus[Np-1][0];
     }
+
+    for(i=0;i<Np;i++)
+    {
+        printf("%f %f %f %f\n",PanelMids[i][0],PanelMids[i][1],PanelMids[i][0]+PanelNorms[i][0],PanelMids[i][1]+PanelNorms[i][1]);
+    }
+
 
     // defining and completing Vortex Birth Matrix
     gsl_matrix *VBM = gsl_matrix_alloc(Np+1,Np+1);
@@ -206,14 +232,14 @@ int main(int argc, char *argv[])
     gsl_vector *VOI = gsl_vector_alloc(Np+1); //Velocity On Infinity
     gsl_vector *VFV = gsl_vector_alloc(Np+1); //Velocity from active vortexes
 
-    gsl_vector *velocities_on_surface = gsl_vector_alloc(Np+1);
+    gsl_vector *velocities_on_surface = gsl_vector_alloc(Np+1); //full velocity on surface = VOI + VFV
 
     gsl_vector *NewVorticities = gsl_vector_alloc(Np+1);
 
 //    gsl_vector_add()
     for(i=0;i<Np;i++)
     {
-        gsl_vector_set(VOI,i,PanelNorms[i][0]*vx_inf+PanelNorms[i][1]*vy_inf);
+        gsl_vector_set(VOI,i,-(PanelNorms[i][0]*vx_inf+PanelNorms[i][1]*vy_inf));
     }
     gsl_vector_set(VOI,Np,0.);
 
@@ -225,7 +251,6 @@ int main(int argc, char *argv[])
 
     for(iterator=0; iterator<Niterations; iterator++)
     {
-
         for(i=0;i<Np;i++)
         {
             InFlow[ActiveVortexesInFLow+i].active = 1;
@@ -238,6 +263,8 @@ int main(int argc, char *argv[])
         // time iteration
         double u_x, u_y;
         printf("active vortexes %d\n",ActiveVortexesInFLow);
+
+#pragma omp parallel for shared(InFlow, NextInFlow) private(i) firstprivate(j, u_x, u_y)
         for(i=0;i<ActiveVortexesInFLow;i++)
         {
             double  I0 = 0., I1 = 0.,
@@ -266,17 +293,28 @@ int main(int argc, char *argv[])
                                                        +(InFlow[i].y-InFlow[j].y)*(InFlow[i].y-InFlow[j].y))/eps);
                 }
             }
+
             I0 = 2*M_PI*eps*eps;
+
             for(j=0;j<Np;j++)
             {
                 if( InFlow[j].active==1 )
                 {
-                    I3_x += PanelNorms[j][0]*exp(-sqrt((InFlow[i].x-PanelMids[j][0])*(InFlow[i].x-PanelMids[j][0])
-                            +(InFlow[i].y-PanelMids[j][1])*(InFlow[i].y-PanelMids[j][1]))/eps)*PanelLength[j];
-                    I3_y += PanelNorms[j][1]*exp(-sqrt((InFlow[i].x-PanelMids[j][0])*(InFlow[i].x-PanelMids[j][0])
-                            +(InFlow[i].y-PanelMids[j][1])*(InFlow[i].y-PanelMids[j][1]))/eps)*PanelLength[j];
-                    I0 += ((InFlow[i].x-PanelMids[j][0])*PanelNorms[j][0]+(InFlow[i].y-PanelMids[j][1])*PanelNorms[j][1])
-                            *PanelLength[j]*Mfield((InFlow[i].x-PanelMids[j][0])/eps,(InFlow[i].y-PanelMids[j][1])/eps);
+                    double Rr = sqrt((InFlow[i].x-PanelMids[j][0])*(InFlow[i].x-PanelMids[j][0])
+                            +(InFlow[i].y-PanelMids[j][1])*(InFlow[i].y-PanelMids[j][1]));
+                    if(Rr/PanelLength[j] > 0.25 && Rr/PanelLength[j] < 4.)
+                    {
+                        I3_x -= PanelNorms[j][0]*exp(-Rr/eps)*PanelLength[j];
+                        I3_y -= PanelNorms[j][1]*exp(-Rr/eps)*PanelLength[j];
+                        I0 -= ((InFlow[i].x-PanelMids[j][0])*PanelNorms[j][0]+(InFlow[i].y-PanelMids[j][1])*PanelNorms[j][1])
+                                *PanelLength[j]*Mfield((InFlow[i].x-PanelMids[j][0])/eps,(InFlow[i].y-PanelMids[j][1])/eps);
+                    }
+                    else if(Rr/PanelLength[j] < 0.25)
+                    {
+                        I3_x -= 2.*PanelNorms[j][0]*eps*(1-exp(-PanelLength[j]/2/eps));
+                        I3_y -= 2.*PanelNorms[j][1]*eps*(1-exp(-PanelLength[j]/2/eps));
+//                        I0 -=
+                    }
                 }
             }
 
@@ -308,6 +346,7 @@ int main(int argc, char *argv[])
                 NextInFlow[i].vorticity = InFlow[i].vorticity;
             }
         }
+
         //updating coords
         for(i=0;i<ActiveVortexesInFLow;i++)
         {
@@ -338,7 +377,7 @@ int main(int argc, char *argv[])
 
         for(j=0; j<Np; j++)
             gsl_vector_set(VFV,j,ExtSpeedInMiddles[j]);
-        gsl_vector_add(velocities_on_surface,VFV);
+        gsl_vector_sub(velocities_on_surface,VFV);
         gsl_vector_set(velocities_on_surface,Np,0);
 
         gsl_linalg_LU_decomp (VBM,p,&k);
