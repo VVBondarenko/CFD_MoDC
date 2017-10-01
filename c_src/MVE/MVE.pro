@@ -9,4 +9,4 @@ SOURCES += main.c
 
 
 
-LIBS += -L/usr/local/lib -lgsl -lgslcblas -lm -fopenmp -Wall -ffast-math
+LIBS += -L/usr/local/lib -lgsl -lgslcblas -lm -fopenmp -Wall -O3

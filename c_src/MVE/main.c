@@ -1,70 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <omp.h>
 #include <string.h>
 #include <gsl/gsl_linalg.h>
 
-/*  Code from PGRM as samples for GSL
- *
- *
- *
-    gsl_matrix_memcpy	(general_system, stream_function.sys);
-    Task->sys = gsl_matrix_alloc (N*N,N*N);
-    Task->rightpart	= gsl_vector_alloc(N*N);
-
-void form_system_t (task *Task)
-{
-    int i, j;
-    basis_args args;
-    args.x = 0.;
-    args.y = 0.;
-    args.m = 0;
-    args.n = 0;
-
-    #pragma omp parallel for shared(Task,N) private(i,j) firstprivate(args)
-    for(i = 0; i < N*N; i++)
-    {
-        args.m = i;
-        gsl_vector_set(Task->rightpart, i, gauss_integral3(right_under_int_t,Task->area,args,2,Task));
-        for(j = 0; j < N*N; j++)
-        {
-            args.n = j;
-            gsl_matrix_set(Task->sys, i,j, gauss_integral3(left_under_int_t,Task->area,args,2,Task));
-        }
-    }
-}
-
-void form_right_part_t (task *Task)
-{
-    int i;//, j;
-    basis_args args;
-    args.x = 0.;
-    args.y = 0.;
-    args.m = 0;
-    args.n = 0;
-
-    #pragma omp parallel for shared(Task,N) private(i) firstprivate(args)
-    for(i = 0; i < N*N; i++)
-    {
-        args.m = i;
-        gsl_vector_set(Task->rightpart, i, gauss_integral3(right_under_int_t,Task->area,args,2,Task));
-    }
-}
-
-void solve_task(task *Task)
-{
-    int i;
-    gsl_permutation * p = gsl_permutation_alloc (N*N);
-    gsl_linalg_LU_decomp (Task->sys,p,&i);
-    gsl_linalg_LU_solve (Task->sys,p,Task->rightpart,Task->solution);
-}
- *
- *
- *
- *
- *
- */
 
 typedef struct Vortex
 {
@@ -79,30 +18,35 @@ typedef struct Vortex
 double Qfield_x(double x, double y)
 {
     double r = x*x+y*y;
-    return -y/(2*M_PI*fmax(r,0.000001));
+    return -y/(2*M_PI*fmax(r,1/1024/1024));
+//    return -y/(2*M_PI*fmax(r,1/1024));
 }
 
 double Qfield_y(double x, double y)
 {
     double r = x*x+y*y;
-    return x/(2*M_PI*fmax(r,0.000001));
+    return  x/(2*M_PI*fmax(r,1/1024/1024));
 }
+
+
 
 double Pfield_x(double x, double y)
 {
-    double r = sqrt(x*x+y*y);
+    double r = hypot(x,y);
     if(r == 0)
-        return 0;
+        return 1.;
     return x/r*exp(-r);
 }
 
 double Pfield_y(double x, double y)
 {
-    double r = sqrt(x*x+y*y);
+    double r = hypot(x,y);
     if(r == 0)
-        return 0;
+        return 1.;
     return y/r*exp(-r);
 }
+
+
 
 
 double Mfield(double x, double y)
@@ -124,37 +68,17 @@ int VortexInBody(double x, double y)
 
 int main(int argc, char **argv)
 {
-    /*
-     * ToDo:
-     *
-     * Добавить вычисление силовых параметров и вывод по ходу вычислений
-     * Построить график силовых воздействий от времени
-     *
-     * Добавить усреднитель вихревого поля (дополнительный вид отрисовки)
-     *  (разбиение сетки NxN внутри которого производится суммирование и вихрей к площади)
-     *
-     * Провести долгосрочный анализ
-     *
-     * Добавить отрисовку в живом времени (или буфер через файл)
-     *
-     *
-     *( с текущими параметрами работает до 150 итераций )
-     */
-    omp_set_dynamic(1);
-    omp_set_num_threads(8);
-
-
-    int Np = 40, MaxVortexes = 16500, Niterations = atoi(argv[1]),      i,j,k, iterator;
-    double nu = 0.0001, tau = 0.01, eps = 0.000001/*, rho = 1.*/;
+    int NumberOfPanels = 12, MaxVortexes = 16500, Niterations = 200,      i,j,k,m,n, iterator;
+    double nu = 1/13, tau = 0.005/*, eps = 0.002*/, rho = 1.;
     double vx_inf = 1., vy_inf = 0.;
 
-    double  PanelNodes [Np][2],
-            PanelMids  [Np][2],
-            PanelNorms [Np][2],
-            PanelTaus  [Np][2],
-            PanelLength[Np];
+    double  PanelNodes [NumberOfPanels][2],
+            PanelMids  [NumberOfPanels][2],
+            PanelNorms [NumberOfPanels][2],
+            PanelTaus  [NumberOfPanels][2],
+            PanelLength[NumberOfPanels];
 
-    double DeployPoints[Np][2];
+    double DeployPoints[NumberOfPanels][2];
 
     Vortex InFlow[MaxVortexes], NextInFlow[MaxVortexes];
 
@@ -165,16 +89,20 @@ int main(int argc, char **argv)
     if(1)/* cylinder profile forming & deploys */
     {
 
-        for(i=0;i<Np;i++)
+        for(i=0;i<NumberOfPanels;i++)
         {
-            PanelNodes[i][0] = cos(2.*M_PI/Np*i);
-            PanelNodes[i][1] = sin(2.*M_PI/Np*i);
+            PanelNodes[i][0] = cos(2.*M_PI/NumberOfPanels*i);
+            PanelNodes[i][1] = sin(2.*M_PI/NumberOfPanels*i);
 
-            DeployPoints[i][0] = 1.02*PanelNodes[i][0];
-            DeployPoints[i][1] = 1.02*PanelNodes[i][1];
+            DeployPoints[i][0] = 1.05*PanelNodes[i][0];
+            DeployPoints[i][1] = 1.05*PanelNodes[i][1];
+
+            PanelNorms[i][0] = cos(2.*M_PI/NumberOfPanels*(i+0.5));
+            PanelNorms[i][1] = sin(2.*M_PI/NumberOfPanels*(i+0.5));
+
         }
 
-        for(i=0;i<Np-1;i++)
+        for(i=0;i<NumberOfPanels-1;i++)
         {
             PanelMids[i][0] = (PanelNodes[i][0]+PanelNodes[i+1][0])/2;
             PanelMids[i][1] = (PanelNodes[i][1]+PanelNodes[i+1][1])/2;
@@ -185,149 +113,191 @@ int main(int argc, char **argv)
                                    PanelTaus[i][1]*PanelTaus[i][1]);
             PanelTaus[i][0] /= PanelLength[i];
             PanelTaus[i][1] /= PanelLength[i];
-            PanelNorms[i][0] =  PanelTaus[i][1];
-            PanelNorms[i][1] = -PanelTaus[i][0];
+//            PanelNorms[i][0] = -PanelTaus[i][1];
+//            PanelNorms[i][1] = PanelTaus[i][0];
         }
-        PanelMids[Np-1][0] = (PanelNodes[Np-1][0]+PanelNodes[0][0])/2;
-        PanelMids[Np-1][1] = (PanelNodes[Np-1][1]+PanelNodes[0][1])/2;
-        PanelTaus[Np-1][0] = (PanelNodes[0][0]-PanelNodes[Np-1][0]);
-        PanelTaus[Np-1][1] = (PanelNodes[0][1]-PanelNodes[Np-1][1]);
-        PanelLength[Np-1]  = sqrt(PanelTaus[Np-1][0]*PanelTaus[Np-1][0]+
-                               PanelTaus[Np-1][1]*PanelTaus[Np-1][1]);
-        PanelTaus[Np-1][0] /= PanelLength[Np-1];
-        PanelTaus[Np-1][1] /= PanelLength[Np-1];
-        PanelNorms[Np-1][0] =  PanelTaus[Np-1][1];
-        PanelNorms[Np-1][1] = -PanelTaus[Np-1][0];
-    }
-
-    for(i=0;i<Np;i++)
-    {
-        printf("%f %f %f %f\n",PanelMids[i][0],PanelMids[i][1],PanelMids[i][0]+PanelNorms[i][0],PanelMids[i][1]+PanelNorms[i][1]);
+        PanelMids[NumberOfPanels-1][0] = (PanelNodes[NumberOfPanels-1][0]+PanelNodes[0][0])/2;
+        PanelMids[NumberOfPanels-1][1] = (PanelNodes[NumberOfPanels-1][1]+PanelNodes[0][1])/2;
+        PanelTaus[NumberOfPanels-1][0] = (PanelNodes[0][0]-PanelNodes[NumberOfPanels-1][0]);
+        PanelTaus[NumberOfPanels-1][1] = (PanelNodes[0][1]-PanelNodes[NumberOfPanels-1][1]);
+        PanelLength[NumberOfPanels-1]  = hypot(PanelTaus[NumberOfPanels-1][0],PanelTaus[NumberOfPanels-1][1]);
+        PanelTaus[NumberOfPanels-1][0] /= PanelLength[NumberOfPanels-1];
+        PanelTaus[NumberOfPanels-1][1] /= PanelLength[NumberOfPanels-1];
+//        PanelNorms[Np-1][0] = -PanelTaus[Np-1][1];
+//        PanelNorms[Np-1][1] = PanelTaus[Np-1][0];
     }
 
 
     // defining and completing Vortex Birth Matrix
-    gsl_matrix *VBM = gsl_matrix_alloc(Np+1,Np+1);
-    for(i=0; i<Np; i++)
+    gsl_matrix *OriginalVortexGenerationMatrix = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
+    gsl_matrix *VortexGenerationMatrix = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
+
+    for(i=0; i<NumberOfPanels; i++)
     {
-        for(j=0; j<Np; j++)
+        for(j=0; j<NumberOfPanels; j++)
         {
-            gsl_matrix_set(VBM,i,j,
+            gsl_matrix_set(VortexGenerationMatrix,i,j,
             PanelNorms[i][0]*Qfield_x(PanelMids[i][0]-DeployPoints[j][0],
                                       PanelMids[i][1]-DeployPoints[j][1])
            +PanelNorms[i][1]*Qfield_y(PanelMids[i][0]-DeployPoints[j][0],
                                       PanelMids[i][1]-DeployPoints[j][1]));
         }
     }
-    for(i=0;i<Np;i++)
+    for(i=0;i<NumberOfPanels;i++)
     {
-        gsl_matrix_set(VBM,Np,i,1);
-        gsl_matrix_set(VBM,i,Np,1);
+        gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,i,1);
+        gsl_matrix_set(VortexGenerationMatrix,i,NumberOfPanels,1);
     }
-    gsl_matrix_set(VBM,Np,Np,0);
-
+    gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,NumberOfPanels,0);
+    gsl_matrix_memcpy(OriginalVortexGenerationMatrix,VortexGenerationMatrix);
 
 
     // recieve initial aproximation for vortexes on surface
-    gsl_vector *VOI = gsl_vector_alloc(Np+1); //Velocity On Infinity
-    gsl_vector *VFV = gsl_vector_alloc(Np+1); //Velocity from active vortexes
+    gsl_vector *VelocityOnInfProjections = gsl_vector_alloc(NumberOfPanels+1); //Velocity On Infinity
+    gsl_vector *VelocityProjections = gsl_vector_alloc(NumberOfPanels+1); //Velocity from active vortexes
+//    gsl_vector *velocities_on_surface = gsl_vector_alloc(Np+1); //full velocity on surface = VOI + VFV
+    gsl_vector *NewVorticities = gsl_vector_alloc(NumberOfPanels+1);
 
-    gsl_vector *velocities_on_surface = gsl_vector_alloc(Np+1); //full velocity on surface = VOI + VFV
 
-    gsl_vector *NewVorticities = gsl_vector_alloc(Np+1);
-
-//    gsl_vector_add()
-    for(i=0;i<Np;i++)
+    for(i=0;i<NumberOfPanels;i++)
     {
-        gsl_vector_set(VOI,i,-(PanelNorms[i][0]*vx_inf+PanelNorms[i][1]*vy_inf));
+        gsl_vector_set(VelocityOnInfProjections,i,-(PanelNorms[i][0]*vx_inf+PanelNorms[i][1]*vy_inf));
     }
-    gsl_vector_set(VOI,Np,0.);
+    gsl_vector_set(VelocityOnInfProjections,NumberOfPanels,0.);
 
 
-    gsl_permutation * p = gsl_permutation_alloc (Np+1);
-    gsl_linalg_LU_decomp (VBM,p,&k);
-    gsl_linalg_LU_solve (VBM,p,VOI,NewVorticities);
+    gsl_permutation * p = gsl_permutation_alloc (NumberOfPanels+1);
+    gsl_linalg_LU_decomp(VortexGenerationMatrix,p,&k);
+    gsl_linalg_LU_solve (VortexGenerationMatrix,p,VelocityOnInfProjections,NewVorticities);
 
+
+    FILE *forces;
+    forces = fopen("forces.dat","w");
 
     for(iterator=0; iterator<Niterations; iterator++)
     {
-        for(i=0;i<Np;i++)
+        double f_x = 0., f_y = 0./*, M_z = 0.*/;
+
+        //add generated vortexes to flow
+        for(i=0;i<NumberOfPanels;i++)
         {
             InFlow[ActiveVortexesInFLow+i].active = 1;
             InFlow[ActiveVortexesInFLow+i].vorticity = gsl_vector_get(NewVorticities,i);
             InFlow[ActiveVortexesInFLow+i].x = DeployPoints[i][0];
             InFlow[ActiveVortexesInFLow+i].y = DeployPoints[i][1];
         }
-        ActiveVortexesInFLow += Np;
+        ActiveVortexesInFLow += NumberOfPanels;
 
         // time iteration
-        double u_x, u_y;
         printf("active vortexes %d\n",ActiveVortexesInFLow);
 
-#pragma omp parallel for shared(InFlow, NextInFlow) private(i) firstprivate(j, u_x, u_y)
         for(i=0;i<ActiveVortexesInFLow;i++)
         {
-            double  I0 = 0., I1 = 0.,
+            while(InFlow[i].active!=1)i++;
+            double eps = sqrt(4/3)*PanelLength[0]/1000;
+            double  I0 = 2*M_PI*eps*eps,
+                    I1 = 0.,
                     I2_x = 0., I2_y = 0.,
                     I3_x = 0., I3_y = 0.;
 
-            u_x = vx_inf;
-            u_y = vy_inf;
-            //Curl component of velocity
+            double u_x = vx_inf;
+            double u_y = vy_inf;
+
+
+            //Epsilon update
+            if(iterator>5 && 0)
+            {
+                double sq1=1., sq2=1., sq3=1.;
+                for(j=0;j<ActiveVortexesInFLow;j++)
+                {
+                    double temp = (InFlow[i].x-InFlow[j].x)*(InFlow[i].x-InFlow[j].x)
+                                 +(InFlow[i].y-InFlow[j].y)*(InFlow[i].y-InFlow[j].y);
+                    if(i!=j && temp < sq1
+                            && InFlow[j].active==1
+                            && InFlow[i].vorticity*InFlow[j].vorticity>0
+                       )
+                    {
+                        sq1 = temp;
+                        sq2 = sq1;
+                        sq3 = sq2;
+                    }
+                }
+                eps = sqrt( (sq1+sq2+sq3)/3 );
+            }
+
+            //Vortex-caused part of velocity
             for(j=0;j<ActiveVortexesInFLow;j++)
             {
-                if( InFlow[j].active==1 && (i-j)!=0 )
+                double rx = InFlow[i].x-InFlow[j].x;
+                double ry = InFlow[i].y-InFlow[j].y;
+                if( InFlow[j].active==1 &&  i!=j /*&& fabs(rx) > 1/1024.*0.25 && fabs(ry) > 1/1024.*0.25*/ )
                 {
-                    u_x += InFlow[j].vorticity*Qfield_x(InFlow[i].x-InFlow[j].x,InFlow[i].y-InFlow[j].y);
-                    u_y += InFlow[j].vorticity*Qfield_y(InFlow[i].x-InFlow[j].x,InFlow[i].y-InFlow[j].y);
+                    u_x += InFlow[j].vorticity*Qfield_x(rx,ry);
+                    u_y += InFlow[j].vorticity*Qfield_y(rx,ry);
                 }
             }
+
+
+
             //Viscous component of velocity
             for(j=0;j<ActiveVortexesInFLow;j++)
             {
                 if( InFlow[j].active==1 )
                 {
-                    I2_x -= InFlow[j].vorticity*Pfield_x((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
-                    I2_y -= InFlow[j].vorticity*Pfield_y((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
-                    I1 += InFlow[j].vorticity*exp(-sqrt((InFlow[i].x-InFlow[j].x)*(InFlow[i].x-InFlow[j].x)
-                                                       +(InFlow[i].y-InFlow[j].y)*(InFlow[i].y-InFlow[j].y))/eps);
+                    I2_x += InFlow[j].vorticity*Pfield_x((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
+                    I2_y += InFlow[j].vorticity*Pfield_y((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
+                    I1  += InFlow[j].vorticity*exp(-hypot((InFlow[i].x-InFlow[j].x),(InFlow[i].y-InFlow[j].y))/eps);
                 }
             }
-
-            I0 = 2*M_PI*eps*eps;
-
-            for(j=0;j<Np;j++)
+            for(j=0;j<NumberOfPanels;j++)
             {
-                if( InFlow[j].active==1 )
-                {
-                    double Rr = sqrt((InFlow[i].x-PanelMids[j][0])*(InFlow[i].x-PanelMids[j][0])
-                            +(InFlow[i].y-PanelMids[j][1])*(InFlow[i].y-PanelMids[j][1]));
-                    if(Rr/PanelLength[j] > 0.25 && Rr/PanelLength[j] < 4.)
-                    {
-                        I3_x -= PanelNorms[j][0]*exp(-Rr/eps)*PanelLength[j];
-                        I3_y -= PanelNorms[j][1]*exp(-Rr/eps)*PanelLength[j];
-                        I0 -= ((InFlow[i].x-PanelMids[j][0])*PanelNorms[j][0]+(InFlow[i].y-PanelMids[j][1])*PanelNorms[j][1])
-                                *PanelLength[j]*Mfield((InFlow[i].x-PanelMids[j][0])/eps,(InFlow[i].y-PanelMids[j][1])/eps);
-                    }
-                    else if(Rr/PanelLength[j] < 0.25)
-                    {
-                        I3_x -= 2.*PanelNorms[j][0]*eps*(1-exp(-PanelLength[j]/2/eps));
-                        I3_y -= 2.*PanelNorms[j][1]*eps*(1-exp(-PanelLength[j]/2/eps));
-//                        I0 -=
-                    }
-                }
+                double Rr = hypot((InFlow[i].x-PanelMids[j][0]),(InFlow[i].y-PanelMids[j][1]));
+                I3_x -= PanelNorms[j][0]*exp(-Rr/eps)*PanelLength[j];
+                I3_y -= PanelNorms[j][1]*exp(-Rr/eps)*PanelLength[j];
+                I0   -= ((InFlow[i].x-PanelMids[j][0])*PanelNorms[j][0]
+                        +(InFlow[i].y-PanelMids[j][1])*PanelNorms[j][1])
+                        *PanelLength[j]
+                        *Mfield((InFlow[i].x-PanelMids[j][0])/eps,
+                        (InFlow[i].y-PanelMids[j][1])/eps);
+
             }
+
 
             //        printf("%f %f\n",u_x,u_y);
             u_x += nu*(-I2_x/I1+I3_x/I0);
             u_y += nu*(-I2_y/I1+I3_y/I0);
             //        printf("%f %f\n",u_x,u_y);
 
-            if(tau*u_x < 100 && tau*u_y < 100)
+
+            if(tau*u_x < 1000 && tau*u_y < 1000 )
             {
                 NextInFlow[i].x = InFlow[i].x + tau*u_x;
                 NextInFlow[i].y = InFlow[i].y + tau*u_y;
-                if(!VortexInBody(NextInFlow[i].x,NextInFlow[i].y))
+
+
+//                int minRmid = 0;
+//контроль протекания
+                double Rmid = sqrt((PanelMids[0][0]-NextInFlow[i].x)*(PanelMids[0][0]-NextInFlow[i].x)+
+                                   (PanelMids[0][1]-NextInFlow[i].y)*(PanelMids[0][1]-NextInFlow[i].y));
+                double projectionDistOnMidVector = (PanelMids[0][0]*NextInFlow[i].x+PanelMids[0][1]*NextInFlow[i].y)/
+                                                   (PanelMids[0][0]*PanelMids[0][0]+PanelMids[0][1]*PanelMids[0][1]);
+
+                for(m=1;m<NumberOfPanels;m++)
+                {
+                    double temp = sqrt((PanelMids[m][0]-NextInFlow[i].x)*(PanelMids[m][0]-NextInFlow[i].x)+
+                                       (PanelMids[m][1]-NextInFlow[i].y)*(PanelMids[m][1]-NextInFlow[i].y));
+                    if(fmin(Rmid,temp)<Rmid)
+                    {
+                        Rmid = temp;
+//                        minRmid = m;
+                        projectionDistOnMidVector = (PanelMids[m][0]*NextInFlow[i].x+PanelMids[m][1]*NextInFlow[i].y)/
+                                                    (PanelMids[m][0]*PanelMids[m][0]+PanelMids[m][1]*PanelMids[m][1]);
+                    }
+                }
+
+
+//                if(!VortexInBody(NextInFlow[i].x,NextInFlow[i].y))
+                if(projectionDistOnMidVector > 1.)
                 {
                     NextInFlow[i].active = InFlow[i].active;
                     NextInFlow[i].vorticity = InFlow[i].vorticity;
@@ -345,7 +315,16 @@ int main(int argc, char **argv)
                 NextInFlow[i].active = 2;
                 NextInFlow[i].vorticity = InFlow[i].vorticity;
             }
+//            if(NextInFlow[i].vorticity<0.01)
         }
+
+        for(m = 0; m < NumberOfPanels; m++)
+        {
+            f_x += -rho*(gsl_vector_get(NewVorticities,m)/tau* PanelMids[m][1]);
+            f_y +=  rho*(gsl_vector_get(NewVorticities,m)/tau* PanelMids[m][0]);
+        }
+
+        fprintf(forces,"%f %f %f\n",iterator*tau, f_x, f_y);
 
         //updating coords
         for(i=0;i<ActiveVortexesInFLow;i++)
@@ -354,41 +333,116 @@ int main(int argc, char **argv)
         }
 
         //definition of speed from vortexes after iteration
-        double ExtSpeedInMiddles[Np];
-        for(j=0; j<Np; j++)
-            ExtSpeedInMiddles[j] = 0;
-        gsl_vector_memcpy(velocities_on_surface,VOI);
+        double VelocityProjInControlPoint[NumberOfPanels];
+        for(j=0; j<NumberOfPanels; j++)
+            VelocityProjInControlPoint[j] = PanelNorms[j][0]*vx_inf + PanelNorms[j][1]*vy_inf;
 
         for(i=0; i<ActiveVortexesInFLow; i++)
         {
             if(InFlow[i].active==1)
             {
-                for(j=0; j<Np; j++)
+                for(j=0; j<NumberOfPanels; j++)
                 {
-                    ExtSpeedInMiddles[j] +=
-                            (PanelNorms[j][0]*Qfield_x(PanelMids[j][0]-InFlow[i].x,
-                            PanelMids[j][1]-InFlow[i].y)
-                            +PanelNorms[j][1]*Qfield_y(PanelMids[j][0]-InFlow[i].x,
-                            PanelMids[j][1]-InFlow[i].y))
+                    VelocityProjInControlPoint[j] +=
+                            (PanelNorms[j][0]*Qfield_x((PanelMids[j][0]-InFlow[i].x),
+                                                       (PanelMids[j][1]-InFlow[i].y))
+                            +PanelNorms[j][1]*Qfield_y((PanelMids[j][0]-InFlow[i].x),
+                                                       (PanelMids[j][1]-InFlow[i].y)))
                             *InFlow[i].vorticity;
                 }
             }
         }
 
-        for(j=0; j<Np; j++)
-            gsl_vector_set(VFV,j,ExtSpeedInMiddles[j]);
-        gsl_vector_sub(velocities_on_surface,VFV);
-        gsl_vector_set(velocities_on_surface,Np,0);
+        for(j=0; j<NumberOfPanels; j++)
+            gsl_vector_set(VelocityProjections,j,-VelocityProjInControlPoint[j]);
+        gsl_vector_set(VelocityProjections,NumberOfPanels,0);
 
-        gsl_linalg_LU_decomp (VBM,p,&k);
-        gsl_linalg_LU_solve (VBM,p,velocities_on_surface,NewVorticities);
+        gsl_matrix_memcpy(VortexGenerationMatrix, OriginalVortexGenerationMatrix);
 
+        gsl_linalg_LU_decomp(VortexGenerationMatrix,p,&k);
+        gsl_linalg_LU_solve (VortexGenerationMatrix,p,VelocityProjections,NewVorticities);
+
+        if(iterator%10==0)
+        {
+            /*
+            FILE *VortexesOut, *BodyOut, *averagedOut;
+            VortexesOut = fopen("MVE_flow.dat","w");
+            BodyOut =     fopen("MVE_body.dat","w");
+            averagedOut = fopen("MVE_aver.dat","w");
+
+            for(i=0;i<ActiveVortexesInFLow;i++)
+            {
+                if(InFlow[i].active==1)
+                    fprintf(VortexesOut,"%f %f %f\n",InFlow[i].x,InFlow[i].y,InFlow[i].vorticity);
+            }
+
+            for(i=0; i<Np; i++)
+                fprintf(BodyOut,"%f %f\n", DeployPoints[i][0], DeployPoints[i][1]);
+
+
+            double averagedVorticity[101][101];
+
+            for(i=0;i<ActiveVortexesInFLow;i++)
+            {
+                if(fabs(InFlow[i].x)<=10 && fabs(InFlow[i].y)<=10 && InFlow[i].active == 1)
+                {
+                    averagedVorticity[(int)(50+(InFlow[i].x)/0.2)][(int)(50+(InFlow[i].y)/0.2)] += InFlow[i].vorticity*0.04;
+                }
+            }
+
+            for(i=0;i<101;i++)
+            {
+                for(j=0;j<101;j++)
+                    fprintf(averagedOut,"%f %f %f\n", -10+i*0.2, -10+j*0.02, averagedVorticity[i][j]);
+
+            }
+
+
+            fclose(averagedOut);
+            fclose(VortexesOut);
+            fclose(BodyOut);
+            int temp;
+            system("screen -S gnuplot -X stuff \"replot^M\" ");
+            scanf("%d",&temp);
+            if(ActiveVortexesInFLow<16000)
+                Niterations +=temp;
+            else
+                return 0;
+//            system("screen -S gnuplot -X stuff \"plot \'MVE_flow.dat\' using 1:2, \'MVE_body.dat\' w line^M\" ");
+*/
+            char FileName[32];
+            sprintf(FileName,"VelocityFiled%6.6d.dat",iterator);
+            FILE *VelocityField;
+            VelocityField = fopen(FileName,"w");
+            fprintf(VelocityField,"TITLE = \"Flow Model\"\n");
+            fprintf(VelocityField,"VARIABLES = \"x\", \"y\", \"vx\", \"vy\"\n");
+            fprintf(VelocityField,"ZONE T=\"Frame 0\", I=%d, J=%d\n", 200, 100);
+            for(i=0;i<200;i++)
+            {
+                for(j=0;j<100;j++)
+                {
+                    double vx=vx_inf, vy=vy_inf;
+                    for(n=0;n<ActiveVortexesInFLow;n++)
+                    {
+                        if(InFlow[n].active==1)
+                        {
+                            vx += InFlow[n].vorticity*Qfield_x((0.04*i-2)-InFlow[n].x,
+                                                               (0.04*j-2)-InFlow[n].y);
+                            vy += InFlow[n].vorticity*Qfield_y((0.04*i-2)-InFlow[n].x,
+                                                               (0.04*j-2)-InFlow[n].y);
+                        }
+                    }
+                    fprintf(VelocityField,"%f %f %f %f\n",0.04*i-2, 0.04*j-2, vx, vy);
+                }
+            }
+        }
     }
-
+/*
     //the most interesting part: output of results
-    FILE *VortexesOut, *BodyOut;
+    FILE *VortexesOut, *BodyOut, *averagedOut;
     VortexesOut = fopen("MVE_flow.dat","w");
     BodyOut =     fopen("MVE_body.dat","w");
+    averagedOut = fopen("MVE_aver.dat","w");
 
     for(i=0;i<ActiveVortexesInFLow;i++)
     {
@@ -399,7 +453,28 @@ int main(int argc, char **argv)
     for(i=0; i<Np; i++)
         fprintf(BodyOut,"%f %f\n", DeployPoints[i][0], DeployPoints[i][1]);
 
+
+    double averagedVorticity[101][101];
+
+    for(i=0;i<ActiveVortexesInFLow;i++)
+    {
+        if(fabs(InFlow[i].x)<=10 && fabs(InFlow[i].y)<=10 && InFlow[i].active == 1)
+        {
+            averagedVorticity[(int)(50+(InFlow[i].x)/0.2)][(int)(50+(InFlow[i].y)/0.2)] += InFlow[i].vorticity*0.04;
+        }
+    }
+
+    for(i=0;i<101;i++)
+    {
+        for(j=0;j<101;j++)
+            fprintf(averagedOut,"%f %f %f\n", -10+i*0.2, -10+j*0.02, averagedVorticity[i][j]);
+
+    }
+
+
+    fclose(averagedOut);
     fclose(VortexesOut);
     fclose(BodyOut);
+    */
     return 0;
 }
