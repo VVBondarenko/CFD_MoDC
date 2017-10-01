@@ -34,8 +34,13 @@ class ViscousVortexDomainSolver
             **PanelTaus,
             **DeployPoints;
 
-    gsl_matrix *OriginalVortexGenerationMatrix;// = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
-    gsl_matrix *VortexGenerationMatrix;// = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
+    gsl_matrix *OriginalVortexGenerationMatrix;
+    gsl_matrix *VortexGenerationMatrix;
+
+    gsl_vector *VelocityProjections;
+    gsl_vector *NewVorticities;
+
+    gsl_permutation *Permutation;
 
     double Qfield_x(double x, double y);
     double Qfield_y(double x, double y);

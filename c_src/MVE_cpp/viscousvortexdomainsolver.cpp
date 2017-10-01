@@ -27,9 +27,12 @@ ViscousVortexDomainSolver::ViscousVortexDomainSolver()
     }
 
     OriginalVortexGenerationMatrix = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
-    VortexGenerationMatrix = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
+    VortexGenerationMatrix         = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
 
+    VelocityProjections = gsl_vector_alloc(NumberOfPanels+1);
+    NewVorticities      = gsl_vector_alloc(NumberOfPanels+1);
 
+    Permutation = gsl_permutation_alloc (NumberOfPanels+1);
 }
 
 ViscousVortexDomainSolver::~ViscousVortexDomainSolver()
@@ -53,6 +56,13 @@ ViscousVortexDomainSolver::~ViscousVortexDomainSolver()
     gsl_matrix_free(VortexGenerationMatrix);
     delete [] OriginalVortexGenerationMatrix;
     delete [] VortexGenerationMatrix;
+
+    gsl_vector_free(VelocityProjections);
+    gsl_vector_free(NewVorticities);
+    delete [] VelocityProjections;
+    delete [] NewVorticities;
+
+    gsl_permutation_free(Permutation);
 }
 
 void ViscousVortexDomainSolver::Solve()
@@ -64,46 +74,17 @@ void ViscousVortexDomainSolver::Solve()
     int ActiveVortexesInFLow=0;
 
     DivideProfileToPanels();
-
-    // completing Vortex Birth Matrix
-//    for(i=0; i<NumberOfPanels; i++)
-//    {
-//        for(j=0; j<NumberOfPanels; j++)
-//        {
-//            gsl_matrix_set(VortexGenerationMatrix,i,j,
-//            PanelNorms[i][0]*Qfield_x(PanelMids[i][0]-DeployPoints[j][0],
-//                                      PanelMids[i][1]-DeployPoints[j][1])
-//           +PanelNorms[i][1]*Qfield_y(PanelMids[i][0]-DeployPoints[j][0],
-//                                      PanelMids[i][1]-DeployPoints[j][1]));
-//        }
-//    }
-
-//    for(i=0;i<NumberOfPanels;i++)
-//    {
-//        gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,i,1);
-//        gsl_matrix_set(VortexGenerationMatrix,i,NumberOfPanels,1);
-//    }
-//    gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,NumberOfPanels,0);
-//    gsl_matrix_memcpy(OriginalVortexGenerationMatrix,VortexGenerationMatrix);
     CompletingGeneratingMatrix();
 
     // recieve initial aproximation for vortexes on surface
-    gsl_vector *VelocityOnInfProjections = gsl_vector_alloc(NumberOfPanels+1); //Velocity On Infinity
-    gsl_vector *VelocityProjections = gsl_vector_alloc(NumberOfPanels+1); //Velocity from active vortexes
-//    gsl_vector *velocities_on_surface = gsl_vector_alloc(Np+1); //full velocity on surface = VOI + VFV
-    gsl_vector *NewVorticities = gsl_vector_alloc(NumberOfPanels+1);
-
-
     for(i=0;i<NumberOfPanels;i++)
     {
-        gsl_vector_set(VelocityOnInfProjections,i,-(PanelNorms[i][0]*vx_inf+PanelNorms[i][1]*vy_inf));
+        gsl_vector_set(VelocityProjections,i,-(PanelNorms[i][0]*vx_inf+PanelNorms[i][1]*vy_inf));
     }
-    gsl_vector_set(VelocityOnInfProjections,NumberOfPanels,0.);
+    gsl_vector_set(VelocityProjections,NumberOfPanels,0.);
 
-
-    gsl_permutation * p = gsl_permutation_alloc (NumberOfPanels+1);
-    gsl_linalg_LU_decomp(VortexGenerationMatrix,p,&k);
-    gsl_linalg_LU_solve (VortexGenerationMatrix,p,VelocityOnInfProjections,NewVorticities);
+    gsl_linalg_LU_decomp(VortexGenerationMatrix,Permutation,&k);
+    gsl_linalg_LU_solve (VortexGenerationMatrix,Permutation,VelocityProjections,NewVorticities);
 
 
     FILE *forces;
@@ -293,8 +274,8 @@ void ViscousVortexDomainSolver::Solve()
 
         gsl_matrix_memcpy(VortexGenerationMatrix, OriginalVortexGenerationMatrix);
 
-        gsl_linalg_LU_decomp(VortexGenerationMatrix,p,&k);
-        gsl_linalg_LU_solve (VortexGenerationMatrix,p,VelocityProjections,NewVorticities);
+        gsl_linalg_LU_decomp(VortexGenerationMatrix,Permutation,&k);
+        gsl_linalg_LU_solve (VortexGenerationMatrix,Permutation,VelocityProjections,NewVorticities);
 
         if(iterator%10==0)
         {
