@@ -2,11 +2,13 @@
 
 ViscousVortexDomainSolver::ViscousVortexDomainSolver()
 {
-    NumberOfPanels = 12;
+    NumberOfPanels = 30;
     MaxVortexes = 16500;
-    Niterations = 100;
+    Niterations = 500;
+    ActiveVortexesInFLow=0;
+
     nu = 1/13;
-    tau = 0.005;
+    tau = 0.001;
     rho = 1.;
     vx_inf = 1.;
     vy_inf = 0.;
@@ -33,6 +35,9 @@ ViscousVortexDomainSolver::ViscousVortexDomainSolver()
     NewVorticities      = gsl_vector_alloc(NumberOfPanels+1);
 
     Permutation = gsl_permutation_alloc (NumberOfPanels+1);
+
+    InFlow      = new Vortex [MaxVortexes];
+    NextInFlow  = new Vortex [MaxVortexes];
 }
 
 ViscousVortexDomainSolver::~ViscousVortexDomainSolver()
@@ -63,15 +68,14 @@ ViscousVortexDomainSolver::~ViscousVortexDomainSolver()
     delete [] NewVorticities;
 
     gsl_permutation_free(Permutation);
+
+    delete [] InFlow;
+    delete [] NextInFlow;
 }
 
 void ViscousVortexDomainSolver::Solve()
 {
     int i,j,k,m,n, iterator;
-
-    Vortex InFlow[MaxVortexes], NextInFlow[MaxVortexes];
-
-    int ActiveVortexesInFLow=0;
 
     DivideProfileToPanels();
     CompletingGeneratingMatrix();
@@ -107,131 +111,7 @@ void ViscousVortexDomainSolver::Solve()
         // time iteration
         printf("active vortexes %d\n",ActiveVortexesInFLow);
 
-        for(i=0;i<ActiveVortexesInFLow;i++)
-        {
-            while(InFlow[i].active!=1)i++;
-            double eps = sqrt(4/3)*PanelLength[0]/1000;
-            double  I0 = 2*M_PI*eps*eps,
-                    I1 = 0.,
-                    I2_x = 0., I2_y = 0.,
-                    I3_x = 0., I3_y = 0.;
-
-            double u_x = vx_inf;
-            double u_y = vy_inf;
-
-
-            //Epsilon update
-            if(iterator>5 && 0)
-            {
-                double sq1=1., sq2=1., sq3=1.;
-                for(j=0;j<ActiveVortexesInFLow;j++)
-                {
-                    double temp = (InFlow[i].x-InFlow[j].x)*(InFlow[i].x-InFlow[j].x)
-                                 +(InFlow[i].y-InFlow[j].y)*(InFlow[i].y-InFlow[j].y);
-                    if(i!=j && temp < sq1
-                            && InFlow[j].active==1
-                            && InFlow[i].vorticity*InFlow[j].vorticity>0
-                       )
-                    {
-                        sq1 = temp;
-                        sq2 = sq1;
-                        sq3 = sq2;
-                    }
-                }
-                eps = sqrt( (sq1+sq2+sq3)/3 );
-            }
-
-            //Vortex-caused part of velocity
-            for(j=0;j<ActiveVortexesInFLow;j++)
-            {
-                double rx = InFlow[i].x-InFlow[j].x;
-                double ry = InFlow[i].y-InFlow[j].y;
-                if( InFlow[j].active==1 &&  i!=j /*&& fabs(rx) > 1/1024.*0.25 && fabs(ry) > 1/1024.*0.25*/ )
-                {
-                    u_x += InFlow[j].vorticity*Qfield_x(rx,ry);
-                    u_y += InFlow[j].vorticity*Qfield_y(rx,ry);
-                }
-            }
-
-
-
-            //Viscous component of velocity
-            for(j=0;j<ActiveVortexesInFLow;j++)
-            {
-                if( InFlow[j].active==1 )
-                {
-                    I2_x += InFlow[j].vorticity*Pfield_x((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
-                    I2_y += InFlow[j].vorticity*Pfield_y((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
-                    I1  += InFlow[j].vorticity*exp(-hypot((InFlow[i].x-InFlow[j].x),(InFlow[i].y-InFlow[j].y))/eps);
-                }
-            }
-            for(j=0;j<NumberOfPanels;j++)
-            {
-                double Rr = hypot((InFlow[i].x-PanelMids[j][0]),(InFlow[i].y-PanelMids[j][1]));
-                I3_x -= PanelNorms[j][0]*exp(-Rr/eps)*PanelLength[j];
-                I3_y -= PanelNorms[j][1]*exp(-Rr/eps)*PanelLength[j];
-                I0   -= ((InFlow[i].x-PanelMids[j][0])*PanelNorms[j][0]
-                        +(InFlow[i].y-PanelMids[j][1])*PanelNorms[j][1])
-                        *PanelLength[j]
-                        *Mfield((InFlow[i].x-PanelMids[j][0])/eps,
-                        (InFlow[i].y-PanelMids[j][1])/eps);
-
-            }
-
-
-            //        printf("%f %f\n",u_x,u_y);
-            u_x += nu*(-I2_x/I1+I3_x/I0);
-            u_y += nu*(-I2_y/I1+I3_y/I0);
-            //        printf("%f %f\n",u_x,u_y);
-
-
-            if(tau*u_x < 1000 && tau*u_y < 1000 )
-            {
-                NextInFlow[i].x = InFlow[i].x + tau*u_x;
-                NextInFlow[i].y = InFlow[i].y + tau*u_y;
-
-
-//контроль протекания
-                double Rmid = sqrt((PanelMids[0][0]-NextInFlow[i].x)*(PanelMids[0][0]-NextInFlow[i].x)+
-                                   (PanelMids[0][1]-NextInFlow[i].y)*(PanelMids[0][1]-NextInFlow[i].y));
-                double projectionDistOnMidVector = (PanelMids[0][0]*NextInFlow[i].x+PanelMids[0][1]*NextInFlow[i].y)/
-                                                   (PanelMids[0][0]*PanelMids[0][0]+PanelMids[0][1]*PanelMids[0][1]);
-
-                for(m=1;m<NumberOfPanels;m++)
-                {
-                    double temp = sqrt((PanelMids[m][0]-NextInFlow[i].x)*(PanelMids[m][0]-NextInFlow[i].x)+
-                                       (PanelMids[m][1]-NextInFlow[i].y)*(PanelMids[m][1]-NextInFlow[i].y));
-                    if(fmin(Rmid,temp)<Rmid)
-                    {
-                        Rmid = temp;
-//                        minRmid = m;
-                        projectionDistOnMidVector = (PanelMids[m][0]*NextInFlow[i].x+PanelMids[m][1]*NextInFlow[i].y)/
-                                                    (PanelMids[m][0]*PanelMids[m][0]+PanelMids[m][1]*PanelMids[m][1]);
-                    }
-                }
-
-
-//                if(!VortexInBody(NextInFlow[i].x,NextInFlow[i].y))
-                if(projectionDistOnMidVector > 1.)
-                {
-                    NextInFlow[i].active = InFlow[i].active;
-                    NextInFlow[i].vorticity = InFlow[i].vorticity;
-                }
-                else
-                {
-                    NextInFlow[i].active = 3;
-                    NextInFlow[i].vorticity = InFlow[i].vorticity;
-                }
-            }
-            else
-            {
-                NextInFlow[i].x = InFlow[i].x;
-                NextInFlow[i].y = InFlow[i].y;
-                NextInFlow[i].active = 2;
-                NextInFlow[i].vorticity = InFlow[i].vorticity;
-            }
-//            if(NextInFlow[i].vorticity<0.01)
-        }
+        UpdateVotexPositions();
 
         for(m = 0; m < NumberOfPanels; m++)
         {
@@ -247,63 +127,14 @@ void ViscousVortexDomainSolver::Solve()
             InFlow[i] = NextInFlow[i];
         }
 
-        //definition of speed from vortexes after iteration
-        double VelocityProjInControlPoint[NumberOfPanels];
-        for(j=0; j<NumberOfPanels; j++)
-            VelocityProjInControlPoint[j] = PanelNorms[j][0]*vx_inf + PanelNorms[j][1]*vy_inf;
-
-        for(i=0; i<ActiveVortexesInFLow; i++)
-        {
-            if(InFlow[i].active==1)
-            {
-                for(j=0; j<NumberOfPanels; j++)
-                {
-                    VelocityProjInControlPoint[j] +=
-                            (PanelNorms[j][0]*Qfield_x((PanelMids[j][0]-InFlow[i].x),
-                                                       (PanelMids[j][1]-InFlow[i].y))
-                            +PanelNorms[j][1]*Qfield_y((PanelMids[j][0]-InFlow[i].x),
-                                                       (PanelMids[j][1]-InFlow[i].y)))
-                            *InFlow[i].vorticity;
-                }
-            }
-        }
-
-        for(j=0; j<NumberOfPanels; j++)
-            gsl_vector_set(VelocityProjections,j,-VelocityProjInControlPoint[j]);
-        gsl_vector_set(VelocityProjections,NumberOfPanels,0);
-
-        gsl_matrix_memcpy(VortexGenerationMatrix, OriginalVortexGenerationMatrix);
-
-        gsl_linalg_LU_decomp(VortexGenerationMatrix,Permutation,&k);
-        gsl_linalg_LU_solve (VortexGenerationMatrix,Permutation,VelocityProjections,NewVorticities);
-
+        UpdateAssociatedVortexes();
         if(iterator%10==0)
         {
             char FileName[32];
-            sprintf(FileName,"VelocityFiled%6.6d.dat",iterator);
-            FILE *VelocityField;
-            VelocityField = fopen(FileName,"w");
-            fprintf(VelocityField,"TITLE = \"Flow Model\"\n");
-            fprintf(VelocityField,"VARIABLES = \"x\", \"y\", \"vx\", \"vy\"\n");
-            fprintf(VelocityField,"ZONE T=\"Frame 0\", I=%d, J=%d\n", 200, 100);
-            for(i=0;i<200;i++)
-            {
-                for(j=0;j<100;j++)
-                {
-                    double vx=vx_inf, vy=vy_inf;
-                    for(n=0;n<ActiveVortexesInFLow;n++)
-                    {
-                        if(InFlow[n].active==1)
-                        {
-                            vx += InFlow[n].vorticity*Qfield_x((0.04*i-2)-InFlow[n].x,
-                                                               (0.04*j-2)-InFlow[n].y);
-                            vy += InFlow[n].vorticity*Qfield_y((0.04*i-2)-InFlow[n].x,
-                                                               (0.04*j-2)-InFlow[n].y);
-                        }
-                    }
-                    fprintf(VelocityField,"%f %f %f %f\n",0.04*i-2, 0.04*j-2, vx, vy);
-                }
-            }
+//            sprintf(FileName,"VelocityFiled%6.6d.dat",iterator);
+//            Output_ParaView_Field(FileName);
+            sprintf(FileName,"VorticityField%6.6d.csv",iterator);
+            Output_ParaView_Line(FileName);
         }
     }
 }
@@ -311,46 +142,44 @@ void ViscousVortexDomainSolver::Solve()
 void ViscousVortexDomainSolver::DivideProfileToPanels()
 {
     int i;
-    if(1)/* cylinder profile forming & deploys */
+    for(i=0;i<NumberOfPanels;i++)
     {
+        PanelNodes[i][0] = cos(2.*M_PI/NumberOfPanels*i);
+        PanelNodes[i][1] = sin(2.*M_PI/NumberOfPanels*i);
 
-        for(i=0;i<NumberOfPanels;i++)
-        {
-            PanelNodes[i][0] = cos(2.*M_PI/NumberOfPanels*i);
-            PanelNodes[i][1] = sin(2.*M_PI/NumberOfPanels*i);
+        DeployPoints[i][0] = 1.05*PanelNodes[i][0];
+        DeployPoints[i][1] = 1.05*PanelNodes[i][1];
 
-            DeployPoints[i][0] = 1.05*PanelNodes[i][0];
-            DeployPoints[i][1] = 1.05*PanelNodes[i][1];
+        PanelNorms[i][0] = cos(2.*M_PI/NumberOfPanels*(i+0.5));
+        PanelNorms[i][1] = sin(2.*M_PI/NumberOfPanels*(i+0.5));
 
-            PanelNorms[i][0] = cos(2.*M_PI/NumberOfPanels*(i+0.5));
-            PanelNorms[i][1] = sin(2.*M_PI/NumberOfPanels*(i+0.5));
+    }
 
-        }
+    for(i=0;i<NumberOfPanels-1;i++)
+    {
+        PanelMids[i][0] = (PanelNodes[i][0]+PanelNodes[i+1][0])/2;
+        PanelMids[i][1] = (PanelNodes[i][1]+PanelNodes[i+1][1])/2;
 
-        for(i=0;i<NumberOfPanels-1;i++)
-        {
-            PanelMids[i][0] = (PanelNodes[i][0]+PanelNodes[i+1][0])/2;
-            PanelMids[i][1] = (PanelNodes[i][1]+PanelNodes[i+1][1])/2;
+        PanelTaus[i][0] = (PanelNodes[i+1][0]-PanelNodes[i][0]);
+        PanelTaus[i][1] = (PanelNodes[i+1][1]-PanelNodes[i][1]);
+        PanelLength[i]  = sqrt(PanelTaus[i][0]*PanelTaus[i][0]+
+                PanelTaus[i][1]*PanelTaus[i][1]);
+        PanelTaus[i][0] /= PanelLength[i];
+        PanelTaus[i][1] /= PanelLength[i];
+        //            PanelNorms[i][0] = -PanelTaus[i][1];
+        //            PanelNorms[i][1] = PanelTaus[i][0];
+    }
+    PanelMids[NumberOfPanels-1][0] = (PanelNodes[NumberOfPanels-1][0]+PanelNodes[0][0])/2;
+    PanelMids[NumberOfPanels-1][1] = (PanelNodes[NumberOfPanels-1][1]+PanelNodes[0][1])/2;
+    PanelTaus[NumberOfPanels-1][0] = (PanelNodes[0][0]-PanelNodes[NumberOfPanels-1][0]);
+    PanelTaus[NumberOfPanels-1][1] = (PanelNodes[0][1]-PanelNodes[NumberOfPanels-1][1]);
+    PanelLength[NumberOfPanels-1]  = hypot(PanelTaus[NumberOfPanels-1][0],PanelTaus[NumberOfPanels-1][1]);
+    PanelTaus[NumberOfPanels-1][0] /= PanelLength[NumberOfPanels-1];
+    PanelTaus[NumberOfPanels-1][1] /= PanelLength[NumberOfPanels-1];
+    //        PanelNorms[Np-1][0] = -PanelTaus[Np-1][1];
+    //        PanelNorms[Np-1][1] = PanelTaus[Np-1][0];
 
-            PanelTaus[i][0] = (PanelNodes[i+1][0]-PanelNodes[i][0]);
-            PanelTaus[i][1] = (PanelNodes[i+1][1]-PanelNodes[i][1]);
-            PanelLength[i]  = sqrt(PanelTaus[i][0]*PanelTaus[i][0]+
-                                   PanelTaus[i][1]*PanelTaus[i][1]);
-            PanelTaus[i][0] /= PanelLength[i];
-            PanelTaus[i][1] /= PanelLength[i];
-//            PanelNorms[i][0] = -PanelTaus[i][1];
-//            PanelNorms[i][1] = PanelTaus[i][0];
-        }
-        PanelMids[NumberOfPanels-1][0] = (PanelNodes[NumberOfPanels-1][0]+PanelNodes[0][0])/2;
-        PanelMids[NumberOfPanels-1][1] = (PanelNodes[NumberOfPanels-1][1]+PanelNodes[0][1])/2;
-        PanelTaus[NumberOfPanels-1][0] = (PanelNodes[0][0]-PanelNodes[NumberOfPanels-1][0]);
-        PanelTaus[NumberOfPanels-1][1] = (PanelNodes[0][1]-PanelNodes[NumberOfPanels-1][1]);
-        PanelLength[NumberOfPanels-1]  = hypot(PanelTaus[NumberOfPanels-1][0],PanelTaus[NumberOfPanels-1][1]);
-        PanelTaus[NumberOfPanels-1][0] /= PanelLength[NumberOfPanels-1];
-        PanelTaus[NumberOfPanels-1][1] /= PanelLength[NumberOfPanels-1];
-//        PanelNorms[Np-1][0] = -PanelTaus[Np-1][1];
-        //        PanelNorms[Np-1][1] = PanelTaus[Np-1][0];
-    }}
+}
 
 void ViscousVortexDomainSolver::CompletingGeneratingMatrix()
 {
@@ -375,6 +204,210 @@ void ViscousVortexDomainSolver::CompletingGeneratingMatrix()
     gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,NumberOfPanels,0);
     gsl_matrix_memcpy(OriginalVortexGenerationMatrix,VortexGenerationMatrix);
 
+}
+
+void ViscousVortexDomainSolver::UpdateVotexPositions()
+{
+    int i,j,m;
+    for(i=0;i<ActiveVortexesInFLow;i++)
+    {
+        while(InFlow[i].active!=1)i++;
+        double eps = sqrt(4/3)*PanelLength[0]/1000;
+        double  I0 = 2*M_PI*eps*eps,
+                I1 = 0.,
+                I2_x = 0., I2_y = 0.,
+                I3_x = 0., I3_y = 0.;
+
+        double u_x = vx_inf;
+        double u_y = vy_inf;
+
+/*
+        //Epsilon update (откуда ноги растут? POLARA?)
+        if(iterator>5 && 0)
+        {
+            double sq1=1., sq2=1., sq3=1.;
+            for(j=0;j<ActiveVortexesInFLow;j++)
+            {
+                double temp = (InFlow[i].x-InFlow[j].x)*(InFlow[i].x-InFlow[j].x)
+                             +(InFlow[i].y-InFlow[j].y)*(InFlow[i].y-InFlow[j].y);
+                if(
+                        i!=j && temp < sq1 &&
+                        InFlow[j].active==1 &&
+                        InFlow[i].vorticity*InFlow[j].vorticity>0
+                   )
+                {
+                    sq1 = temp;
+                    sq2 = sq1;
+                    sq3 = sq2;
+                }
+            }
+            eps = sqrt( (sq1+sq2+sq3)/3 );
+        }
+*/
+        //Vortex-caused part of velocity
+        for(j=0;j<ActiveVortexesInFLow;j++)
+        {
+            double rx = InFlow[i].x-InFlow[j].x;
+            double ry = InFlow[i].y-InFlow[j].y;
+            if( InFlow[j].active==1 &&  i!=j )
+            {
+                u_x += InFlow[j].vorticity*Qfield_x(rx,ry);
+                u_y += InFlow[j].vorticity*Qfield_y(rx,ry);
+            }
+        }
+
+
+        //Viscous component of velocity
+        for(j=0;j<ActiveVortexesInFLow;j++)
+        {
+            if( InFlow[j].active==1 )
+            {
+                I2_x += InFlow[j].vorticity*Pfield_x((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
+                I2_y += InFlow[j].vorticity*Pfield_y((InFlow[i].x-InFlow[j].x)/eps,(InFlow[i].y-InFlow[j].y)/eps)/eps;
+                I1  += InFlow[j].vorticity*exp(-hypot((InFlow[i].x-InFlow[j].x),(InFlow[i].y-InFlow[j].y))/eps);
+            }
+        }
+        for(j=0;j<NumberOfPanels;j++)
+        {
+            double Rr = hypot((InFlow[i].x-PanelMids[j][0]),(InFlow[i].y-PanelMids[j][1]));
+            I3_x -= PanelNorms[j][0]*exp(-Rr/eps)*PanelLength[j];
+            I3_y -= PanelNorms[j][1]*exp(-Rr/eps)*PanelLength[j];
+            I0   -= ((InFlow[i].x-PanelMids[j][0])*PanelNorms[j][0]
+                    +(InFlow[i].y-PanelMids[j][1])*PanelNorms[j][1])
+                    *PanelLength[j]
+                    *Mfield((InFlow[i].x-PanelMids[j][0])/eps,
+                    (InFlow[i].y-PanelMids[j][1])/eps);
+
+        }
+
+        u_x += nu*(-I2_x/I1+I3_x/I0);
+        u_y += nu*(-I2_y/I1+I3_y/I0);
+
+
+        if(tau*u_x < 1000 && tau*u_y < 1000 )
+        {
+            NextInFlow[i].x = InFlow[i].x + tau*u_x;
+            NextInFlow[i].y = InFlow[i].y + tau*u_y;
+
+
+            //контроль протекания
+            double Rmid = hypot((PanelMids[0][0]-NextInFlow[i].x),
+                                (PanelMids[0][1]-NextInFlow[i].y));
+            double projectionDistOnMidVector = (PanelMids[0][0]*NextInFlow[i].x+PanelMids[0][1]*NextInFlow[i].y)/
+                                               (PanelMids[0][0]*PanelMids[0][0]+PanelMids[0][1]*PanelMids[0][1]);
+
+            for(m=1;m<NumberOfPanels;m++)
+            {
+                double temp = sqrt((PanelMids[m][0]-NextInFlow[i].x)*(PanelMids[m][0]-NextInFlow[i].x)+
+                                   (PanelMids[m][1]-NextInFlow[i].y)*(PanelMids[m][1]-NextInFlow[i].y));
+                if(fmin(Rmid,temp)<Rmid)
+                {
+                    Rmid = temp;
+                    projectionDistOnMidVector = (PanelMids[m][0]*NextInFlow[i].x+PanelMids[m][1]*NextInFlow[i].y)/
+                                                (PanelMids[m][0]*PanelMids[m][0]+PanelMids[m][1]*PanelMids[m][1]);
+                }
+            }
+
+
+            if(projectionDistOnMidVector > 1.)
+            {
+                NextInFlow[i].active = InFlow[i].active;
+                NextInFlow[i].vorticity = InFlow[i].vorticity;
+            }
+            else
+            {
+                NextInFlow[i].active = 3;
+                NextInFlow[i].vorticity = InFlow[i].vorticity;
+            }
+        }
+        else
+        {
+            NextInFlow[i].x = InFlow[i].x;
+            NextInFlow[i].y = InFlow[i].y;
+            NextInFlow[i].active = 2;
+            NextInFlow[i].vorticity = InFlow[i].vorticity;
+        }
+    }
+}
+
+void ViscousVortexDomainSolver::UpdateAssociatedVortexes()
+{
+    int i,j,k;
+
+    double VelocityProjInControlPoint[NumberOfPanels];
+    for(j=0; j<NumberOfPanels; j++)
+        VelocityProjInControlPoint[j] = PanelNorms[j][0]*vx_inf+
+                                        PanelNorms[j][1]*vy_inf;
+
+    for(i=0; i<ActiveVortexesInFLow; i++)
+    {
+        if(InFlow[i].active==1)
+        {
+            for(j=0; j<NumberOfPanels; j++)
+            {
+                VelocityProjInControlPoint[j] +=
+                        (PanelNorms[j][0]*Qfield_x((PanelMids[j][0]-InFlow[i].x),
+                                                   (PanelMids[j][1]-InFlow[i].y))
+                        +PanelNorms[j][1]*Qfield_y((PanelMids[j][0]-InFlow[i].x),
+                                                   (PanelMids[j][1]-InFlow[i].y)))
+                        *InFlow[i].vorticity;
+            }
+        }
+    }
+
+    for(j=0; j<NumberOfPanels; j++)
+        gsl_vector_set(VelocityProjections,j,-VelocityProjInControlPoint[j]);
+    gsl_vector_set(VelocityProjections,NumberOfPanels,0);
+
+    gsl_matrix_memcpy(VortexGenerationMatrix, OriginalVortexGenerationMatrix);
+
+    gsl_linalg_LU_decomp(VortexGenerationMatrix,Permutation,&k);
+    gsl_linalg_LU_solve (VortexGenerationMatrix,Permutation,VelocityProjections,NewVorticities);
+
+}
+
+void ViscousVortexDomainSolver::Output_ParaView_Field(const char *FileName)
+{
+    int i,j,n;
+    FILE *VelocityField;
+    VelocityField = fopen(FileName,"w");
+    fprintf(VelocityField,"TITLE = \"Flow Model\"\n");
+    fprintf(VelocityField,"VARIABLES = \"x\", \"y\", \"vx\", \"vy\"\n");
+    fprintf(VelocityField,"ZONE T=\"Frame 0\", I=%d, J=%d\n", 200, 100);
+    for(i=0;i<200;i++)
+    {
+        for(j=0;j<100;j++)
+        {
+            double vx=vx_inf, vy=vy_inf;
+            for(n=0;n<ActiveVortexesInFLow;n++)
+            {
+                if(InFlow[n].active==1)
+                {
+                    vx += InFlow[n].vorticity*Qfield_x((0.04*i-2)-InFlow[n].x,
+                                                       (0.04*j-2)-InFlow[n].y);
+                    vy += InFlow[n].vorticity*Qfield_y((0.04*i-2)-InFlow[n].x,
+                                                       (0.04*j-2)-InFlow[n].y);
+                }
+            }
+            fprintf(VelocityField,"%f %f %f %f\n",0.04*i-2, 0.04*j-2, vx, vy);
+        }
+    }
+    fclose(VelocityField);
+}
+
+void ViscousVortexDomainSolver::Output_ParaView_Line(const char *FileName)
+{
+    int n;
+    FILE *VelocityField;
+    VelocityField = fopen(FileName,"w");
+    fprintf(VelocityField,"X,Y,Z,vorticity\n");
+    for(n=0;n<ActiveVortexesInFLow;n++)
+    {
+        if(InFlow[n].active==1)
+            fprintf(VelocityField,"%f,%f,%f,%f\n",InFlow[n].x,InFlow[n].y,0.,InFlow[n].vorticity);
+
+    }
+    fclose(VelocityField);
 }
 
 double ViscousVortexDomainSolver::Qfield_x(double x, double y)
