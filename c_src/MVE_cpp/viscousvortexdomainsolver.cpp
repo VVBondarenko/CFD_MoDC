@@ -4,97 +4,88 @@ ViscousVortexDomainSolver::ViscousVortexDomainSolver()
 {
     NumberOfPanels = 12;
     MaxVortexes = 16500;
-    Niterations = 200;
+    Niterations = 100;
     nu = 1/13;
     tau = 0.005;
     rho = 1.;
     vx_inf = 1.;
     vy_inf = 0.;
+
+    PanelLength = new double  [NumberOfPanels];
+    PanelMids   = new double* [NumberOfPanels];
+    PanelNodes  = new double* [NumberOfPanels];
+    PanelNorms  = new double* [NumberOfPanels];
+    PanelTaus   = new double* [NumberOfPanels];
+    DeployPoints= new double* [NumberOfPanels];
+    for(int i=0;i<NumberOfPanels;i++)
+    {
+        PanelMids   [i] = new double [2];
+        PanelNodes  [i] = new double [2];
+        PanelNorms  [i] = new double [2];
+        PanelTaus   [i] = new double [2];
+        DeployPoints[i] = new double [2];
+    }
+
+    OriginalVortexGenerationMatrix = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
+    VortexGenerationMatrix = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
+
+
+}
+
+ViscousVortexDomainSolver::~ViscousVortexDomainSolver()
+{
+    delete [] PanelLength;
+    for(int i = 0; i < NumberOfPanels; i++)
+    {
+        delete [] PanelMids[i];
+        delete [] PanelNodes[i];
+        delete [] PanelNorms[i];
+        delete [] PanelTaus[i];
+        delete [] DeployPoints[i];
+    }
+    delete [] PanelMids;
+    delete [] PanelNodes;
+    delete [] PanelNorms;
+    delete [] PanelTaus;
+    delete [] DeployPoints;
+
+    gsl_matrix_free(OriginalVortexGenerationMatrix);
+    gsl_matrix_free(VortexGenerationMatrix);
+    delete [] OriginalVortexGenerationMatrix;
+    delete [] VortexGenerationMatrix;
 }
 
 void ViscousVortexDomainSolver::Solve()
 {
     int i,j,k,m,n, iterator;
 
-    double  PanelNodes [NumberOfPanels][2],
-            PanelMids  [NumberOfPanels][2],
-            PanelNorms [NumberOfPanels][2],
-            PanelTaus  [NumberOfPanels][2],
-            PanelLength[NumberOfPanels];
-
-    double DeployPoints[NumberOfPanels][2];
-
     Vortex InFlow[MaxVortexes], NextInFlow[MaxVortexes];
 
     int ActiveVortexesInFLow=0;
 
+    DivideProfileToPanels();
 
+    // completing Vortex Birth Matrix
+//    for(i=0; i<NumberOfPanels; i++)
+//    {
+//        for(j=0; j<NumberOfPanels; j++)
+//        {
+//            gsl_matrix_set(VortexGenerationMatrix,i,j,
+//            PanelNorms[i][0]*Qfield_x(PanelMids[i][0]-DeployPoints[j][0],
+//                                      PanelMids[i][1]-DeployPoints[j][1])
+//           +PanelNorms[i][1]*Qfield_y(PanelMids[i][0]-DeployPoints[j][0],
+//                                      PanelMids[i][1]-DeployPoints[j][1]));
+//        }
+//    }
 
-    if(1)/* cylinder profile forming & deploys */
-    {
-
-        for(i=0;i<NumberOfPanels;i++)
-        {
-            PanelNodes[i][0] = cos(2.*M_PI/NumberOfPanels*i);
-            PanelNodes[i][1] = sin(2.*M_PI/NumberOfPanels*i);
-
-            DeployPoints[i][0] = 1.05*PanelNodes[i][0];
-            DeployPoints[i][1] = 1.05*PanelNodes[i][1];
-
-            PanelNorms[i][0] = cos(2.*M_PI/NumberOfPanels*(i+0.5));
-            PanelNorms[i][1] = sin(2.*M_PI/NumberOfPanels*(i+0.5));
-
-        }
-
-        for(i=0;i<NumberOfPanels-1;i++)
-        {
-            PanelMids[i][0] = (PanelNodes[i][0]+PanelNodes[i+1][0])/2;
-            PanelMids[i][1] = (PanelNodes[i][1]+PanelNodes[i+1][1])/2;
-
-            PanelTaus[i][0] = (PanelNodes[i+1][0]-PanelNodes[i][0]);
-            PanelTaus[i][1] = (PanelNodes[i+1][1]-PanelNodes[i][1]);
-            PanelLength[i]  = sqrt(PanelTaus[i][0]*PanelTaus[i][0]+
-                                   PanelTaus[i][1]*PanelTaus[i][1]);
-            PanelTaus[i][0] /= PanelLength[i];
-            PanelTaus[i][1] /= PanelLength[i];
-//            PanelNorms[i][0] = -PanelTaus[i][1];
-//            PanelNorms[i][1] = PanelTaus[i][0];
-        }
-        PanelMids[NumberOfPanels-1][0] = (PanelNodes[NumberOfPanels-1][0]+PanelNodes[0][0])/2;
-        PanelMids[NumberOfPanels-1][1] = (PanelNodes[NumberOfPanels-1][1]+PanelNodes[0][1])/2;
-        PanelTaus[NumberOfPanels-1][0] = (PanelNodes[0][0]-PanelNodes[NumberOfPanels-1][0]);
-        PanelTaus[NumberOfPanels-1][1] = (PanelNodes[0][1]-PanelNodes[NumberOfPanels-1][1]);
-        PanelLength[NumberOfPanels-1]  = hypot(PanelTaus[NumberOfPanels-1][0],PanelTaus[NumberOfPanels-1][1]);
-        PanelTaus[NumberOfPanels-1][0] /= PanelLength[NumberOfPanels-1];
-        PanelTaus[NumberOfPanels-1][1] /= PanelLength[NumberOfPanels-1];
-//        PanelNorms[Np-1][0] = -PanelTaus[Np-1][1];
-//        PanelNorms[Np-1][1] = PanelTaus[Np-1][0];
-    }
-
-
-    // defining and completing Vortex Birth Matrix
-    gsl_matrix *OriginalVortexGenerationMatrix = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
-    gsl_matrix *VortexGenerationMatrix = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
-
-    for(i=0; i<NumberOfPanels; i++)
-    {
-        for(j=0; j<NumberOfPanels; j++)
-        {
-            gsl_matrix_set(VortexGenerationMatrix,i,j,
-            PanelNorms[i][0]*Qfield_x(PanelMids[i][0]-DeployPoints[j][0],
-                                      PanelMids[i][1]-DeployPoints[j][1])
-           +PanelNorms[i][1]*Qfield_y(PanelMids[i][0]-DeployPoints[j][0],
-                                      PanelMids[i][1]-DeployPoints[j][1]));
-        }
-    }
-    for(i=0;i<NumberOfPanels;i++)
-    {
-        gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,i,1);
-        gsl_matrix_set(VortexGenerationMatrix,i,NumberOfPanels,1);
-    }
-    gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,NumberOfPanels,0);
-    gsl_matrix_memcpy(OriginalVortexGenerationMatrix,VortexGenerationMatrix);
-
+//    for(i=0;i<NumberOfPanels;i++)
+//    {
+//        gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,i,1);
+//        gsl_matrix_set(VortexGenerationMatrix,i,NumberOfPanels,1);
+//    }
+//    gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,NumberOfPanels,0);
+//    gsl_matrix_memcpy(OriginalVortexGenerationMatrix,VortexGenerationMatrix);
+    CompletingGeneratingMatrix();
 
     // recieve initial aproximation for vortexes on surface
     gsl_vector *VelocityOnInfProjections = gsl_vector_alloc(NumberOfPanels+1); //Velocity On Infinity
@@ -334,6 +325,75 @@ void ViscousVortexDomainSolver::Solve()
             }
         }
     }
+}
+
+void ViscousVortexDomainSolver::DivideProfileToPanels()
+{
+    int i;
+    if(1)/* cylinder profile forming & deploys */
+    {
+
+        for(i=0;i<NumberOfPanels;i++)
+        {
+            PanelNodes[i][0] = cos(2.*M_PI/NumberOfPanels*i);
+            PanelNodes[i][1] = sin(2.*M_PI/NumberOfPanels*i);
+
+            DeployPoints[i][0] = 1.05*PanelNodes[i][0];
+            DeployPoints[i][1] = 1.05*PanelNodes[i][1];
+
+            PanelNorms[i][0] = cos(2.*M_PI/NumberOfPanels*(i+0.5));
+            PanelNorms[i][1] = sin(2.*M_PI/NumberOfPanels*(i+0.5));
+
+        }
+
+        for(i=0;i<NumberOfPanels-1;i++)
+        {
+            PanelMids[i][0] = (PanelNodes[i][0]+PanelNodes[i+1][0])/2;
+            PanelMids[i][1] = (PanelNodes[i][1]+PanelNodes[i+1][1])/2;
+
+            PanelTaus[i][0] = (PanelNodes[i+1][0]-PanelNodes[i][0]);
+            PanelTaus[i][1] = (PanelNodes[i+1][1]-PanelNodes[i][1]);
+            PanelLength[i]  = sqrt(PanelTaus[i][0]*PanelTaus[i][0]+
+                                   PanelTaus[i][1]*PanelTaus[i][1]);
+            PanelTaus[i][0] /= PanelLength[i];
+            PanelTaus[i][1] /= PanelLength[i];
+//            PanelNorms[i][0] = -PanelTaus[i][1];
+//            PanelNorms[i][1] = PanelTaus[i][0];
+        }
+        PanelMids[NumberOfPanels-1][0] = (PanelNodes[NumberOfPanels-1][0]+PanelNodes[0][0])/2;
+        PanelMids[NumberOfPanels-1][1] = (PanelNodes[NumberOfPanels-1][1]+PanelNodes[0][1])/2;
+        PanelTaus[NumberOfPanels-1][0] = (PanelNodes[0][0]-PanelNodes[NumberOfPanels-1][0]);
+        PanelTaus[NumberOfPanels-1][1] = (PanelNodes[0][1]-PanelNodes[NumberOfPanels-1][1]);
+        PanelLength[NumberOfPanels-1]  = hypot(PanelTaus[NumberOfPanels-1][0],PanelTaus[NumberOfPanels-1][1]);
+        PanelTaus[NumberOfPanels-1][0] /= PanelLength[NumberOfPanels-1];
+        PanelTaus[NumberOfPanels-1][1] /= PanelLength[NumberOfPanels-1];
+//        PanelNorms[Np-1][0] = -PanelTaus[Np-1][1];
+        //        PanelNorms[Np-1][1] = PanelTaus[Np-1][0];
+    }}
+
+void ViscousVortexDomainSolver::CompletingGeneratingMatrix()
+{
+    int i,j;
+    for(i=0; i<NumberOfPanels; i++)
+    {
+        for(j=0; j<NumberOfPanels; j++)
+        {
+            gsl_matrix_set(VortexGenerationMatrix,i,j,
+            PanelNorms[i][0]*Qfield_x(PanelMids[i][0]-DeployPoints[j][0],
+                                      PanelMids[i][1]-DeployPoints[j][1])
+           +PanelNorms[i][1]*Qfield_y(PanelMids[i][0]-DeployPoints[j][0],
+                                      PanelMids[i][1]-DeployPoints[j][1]));
+        }
+    }
+
+    for(i=0;i<NumberOfPanels;i++)
+    {
+        gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,i,1);
+        gsl_matrix_set(VortexGenerationMatrix,i,NumberOfPanels,1);
+    }
+    gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,NumberOfPanels,0);
+    gsl_matrix_memcpy(OriginalVortexGenerationMatrix,VortexGenerationMatrix);
+
 }
 
 double ViscousVortexDomainSolver::Qfield_x(double x, double y)

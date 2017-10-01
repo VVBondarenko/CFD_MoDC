@@ -27,6 +27,16 @@ class ViscousVortexDomainSolver
     double vx_inf;
     double vy_inf;
 
+    double  *PanelLength;
+    double  **PanelNodes,
+            **PanelMids,
+            **PanelNorms,
+            **PanelTaus,
+            **DeployPoints;
+
+    gsl_matrix *OriginalVortexGenerationMatrix;// = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
+    gsl_matrix *VortexGenerationMatrix;// = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
+
     double Qfield_x(double x, double y);
     double Qfield_y(double x, double y);
 
@@ -38,10 +48,11 @@ class ViscousVortexDomainSolver
     int VortexInBody(double x, double y);
 public:
     ViscousVortexDomainSolver();
+    ~ViscousVortexDomainSolver();
 
     void Solve();
-
-
+    void DivideProfileToPanels();
+    void CompletingGeneratingMatrix();
 };
 
 #endif // VISCOUSVORTEXDOMAINSOLVER_H
