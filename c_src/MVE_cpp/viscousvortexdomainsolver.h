@@ -7,14 +7,24 @@
 #include <string.h>
 #include <gsl/gsl_linalg.h>
 
+#include <vector>
+#include <thread>
+#include <mutex>
+
+#define VORTEX_IN_FLOW 1
+#define VORTEX_OUT_OF_RANGE 2
+#define VORTEX_IN_BODY 3
+
+
 typedef struct Vortex
 {
     double x, y;
     double vorticity;
 
-    int active;
+    int status;
 } Vortex;
 
+//ToDo: add method for resumption of calculations
 
 class ViscousVortexDomainSolver
 {
@@ -44,9 +54,11 @@ class ViscousVortexDomainSolver
 
     gsl_permutation *Permutation;
 
-    //ToDo: replace static array with vector container
-    Vortex *InFlow;
-    Vortex *NextInFlow;
+    std::vector<Vortex> InFlow;
+    std::vector<Vortex> NextInFlow;
+    std::vector<Vortex> InBodyVortexes;
+
+    std::mutex NextInFlow_WriteMutex;
 
     double Qfield_x(double x, double y);
     double Qfield_y(double x, double y);
@@ -65,11 +77,18 @@ public:
     void Solve();
     void DivideProfileToPanels();
     void CompletingGeneratingMatrix();
-    void UpdateVotexPositions();
-    void UpdateAssociatedVortexes();
 
     void Output_ParaView_Field(const char *FileName);
     void Output_ParaView_Line(const char *FileName);
+
+    void Thread_UpdateVortexPosition(int ID, int ThreadNum);
+    static void ThreadCrutch_UpdateVotexPositions(ViscousVortexDomainSolver *Task, int ID, int ThreadNum);
+
+private:
+    void UpdateVotexPositions();
+    void UpdateAssociatedVortexes();
+    double UpdateEpsilon(int i, double InitialEpsilon);
+    int LeakageControl(double u_x, int i, double NextY, double u_y, double NextX);
 };
 
 #endif // VISCOUSVORTEXDOMAINSOLVER_H
