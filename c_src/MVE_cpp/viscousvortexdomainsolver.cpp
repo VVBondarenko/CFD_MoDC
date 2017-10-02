@@ -2,9 +2,9 @@
 
 ViscousVortexDomainSolver::ViscousVortexDomainSolver()
 {
-    NumberOfPanels = 30;
+    NumberOfPanels = 10;
     MaxVortexes = 16500;
-    Niterations = 500;
+    Niterations = 100;
     ActiveVortexesInFLow=0;
 
     nu = 1/13;
@@ -59,18 +59,18 @@ ViscousVortexDomainSolver::~ViscousVortexDomainSolver()
 
     gsl_matrix_free(OriginalVortexGenerationMatrix);
     gsl_matrix_free(VortexGenerationMatrix);
-    delete [] OriginalVortexGenerationMatrix;
-    delete [] VortexGenerationMatrix;
+//    delete [] OriginalVortexGenerationMatrix;
+//    delete [] VortexGenerationMatrix;
 
     gsl_vector_free(VelocityProjections);
     gsl_vector_free(NewVorticities);
-    delete [] VelocityProjections;
-    delete [] NewVorticities;
+//    delete [] VelocityProjections;
+//    delete [] NewVorticities;
 
     gsl_permutation_free(Permutation);
 
-    delete [] InFlow;
-    delete [] NextInFlow;
+//    delete [] InFlow;
+//    delete [] NextInFlow;
 }
 
 void ViscousVortexDomainSolver::Solve()
@@ -128,7 +128,7 @@ void ViscousVortexDomainSolver::Solve()
         }
 
         UpdateAssociatedVortexes();
-        if(iterator%10==0)
+        if(iterator%3==0 || 1)
         {
             char FileName[32];
 //            sprintf(FileName,"VelocityFiled%6.6d.dat",iterator);
@@ -212,7 +212,7 @@ void ViscousVortexDomainSolver::UpdateVotexPositions()
     for(i=0;i<ActiveVortexesInFLow;i++)
     {
         while(InFlow[i].active!=1)i++;
-        double eps = sqrt(4/3)*PanelLength[0]/1000;
+        double eps = sqrt(4/3)*PanelLength[0];
         double  I0 = 2*M_PI*eps*eps,
                 I1 = 0.,
                 I2_x = 0., I2_y = 0.,
@@ -221,9 +221,9 @@ void ViscousVortexDomainSolver::UpdateVotexPositions()
         double u_x = vx_inf;
         double u_y = vy_inf;
 
-/*
+
         //Epsilon update (откуда ноги растут? POLARA?)
-        if(iterator>5 && 0)
+        if(ActiveVortexesInFLow>NumberOfPanels)
         {
             double sq1=1., sq2=1., sq3=1.;
             for(j=0;j<ActiveVortexesInFLow;j++)
@@ -243,7 +243,7 @@ void ViscousVortexDomainSolver::UpdateVotexPositions()
             }
             eps = sqrt( (sq1+sq2+sq3)/3 );
         }
-*/
+
         //Vortex-caused part of velocity
         for(j=0;j<ActiveVortexesInFLow;j++)
         {
