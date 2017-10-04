@@ -6,7 +6,7 @@ CONFIG -= qt
 SOURCES += main.cpp \
     viscousvortexdomainsolver.cpp
 
-LIBS += -L/usr/local/lib -lgsl -lgslcblas
+LIBS += -L/usr/local/lib -lgsl -lgslcblas -lpthread
 
 HEADERS += \
     viscousvortexdomainsolver.h

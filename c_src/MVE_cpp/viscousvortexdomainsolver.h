@@ -22,6 +22,7 @@ typedef struct Vortex
     double vorticity;
 
     int status;
+    int generationSide;
 } Vortex;
 
 //ToDo: add method for resumption of calculations
@@ -38,6 +39,8 @@ class ViscousVortexDomainSolver
     double rho;
     double vx_inf;
     double vy_inf;
+
+    double maxEps;
 
     double  *PanelLength;
     double  **PanelNodes,
@@ -89,6 +92,7 @@ private:
     void UpdateAssociatedVortexes();
     double UpdateEpsilon(int i, double InitialEpsilon);
     int LeakageControl(double u_x, int i, double NextY, double u_y, double NextX);
+    void AddNewVortexesToFlow();
 };
 
 #endif // VISCOUSVORTEXDOMAINSOLVER_H
