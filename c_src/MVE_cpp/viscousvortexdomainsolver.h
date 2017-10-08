@@ -11,6 +11,8 @@
 #include <thread>
 #include <mutex>
 
+#include <streamline.h>
+
 #define VORTEX_IN_FLOW 1
 #define VORTEX_OUT_OF_RANGE 2
 #define VORTEX_IN_BODY 3
@@ -57,11 +59,16 @@ class ViscousVortexDomainSolver
 
     gsl_permutation *Permutation;
 
-    std::vector<Vortex> InFlow;
-    std::vector<Vortex> NextInFlow;
-    std::vector<Vortex> InBodyVortexes;
+    std::vector <Vortex> InFlow;
+    std::vector <Vortex> NextInFlow;
+    std::vector <Vortex> InBodyVortexes;
 
     std::mutex NextInFlow_WriteMutex;
+
+    std::vector <StreamLinePoint> StreamLine1;
+    std::vector <StreamLinePoint> StreamLine2;
+
+    void UpdateStreamLines();
 
     double Qfield_x(double x, double y);
     double Qfield_y(double x, double y);
@@ -82,17 +89,21 @@ public:
     void CompletingGeneratingMatrix();
 
     void Output_ParaView_Field(const char *FileName);
-    void Output_ParaView_Line(const char *FileName);
+    void Output_ParaView_Field_with_exclusions(const char *FileName);
+    void Output_ParaView_AllVortexes(const char *FileName);
+    void Output_StreamLines(const char *FileName);
 
     void Thread_UpdateVortexPosition(int ID, int ThreadNum);
     static void ThreadCrutch_UpdateVotexPositions(ViscousVortexDomainSolver *Task, int ID, int ThreadNum);
 
 private:
     void UpdateVotexPositions();
-    void UpdateAssociatedVortexes();
+    void ComputeAssociatedVortexes();
     double UpdateEpsilon(int i, double InitialEpsilon);
     int LeakageControl(double u_x, int i, double NextY, double u_y, double NextX);
     void AddNewVortexesToFlow();
+    double xVelocityAt(double x, double y);
+    double yVelocityAt(double x, double y);
 };
 
 #endif // VISCOUSVORTEXDOMAINSOLVER_H
