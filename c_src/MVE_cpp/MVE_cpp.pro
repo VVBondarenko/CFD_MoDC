@@ -7,7 +7,9 @@ SOURCES += main.cpp \
     viscousvortexdomainsolver.cpp \
     streamline.cpp
 
-LIBS += -L/usr/local/lib -lgsl -lgslcblas -lpthread
+LIBS += -L/usr/local/lib -lgsl -lgslcblas -fopenmp
+QMAKE_LFLAGS += -fopenmp
+QMAKE_CXXFLAGS += -fopenmp
 
 HEADERS += \
     viscousvortexdomainsolver.h \

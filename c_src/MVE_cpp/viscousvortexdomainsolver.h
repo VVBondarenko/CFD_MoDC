@@ -6,10 +6,10 @@
 #include <math.h>
 #include <string.h>
 #include <gsl/gsl_linalg.h>
-
 #include <vector>
-#include <thread>
-#include <mutex>
+#include <algorithm>
+
+#include <omp.h>
 
 #include <streamline.h>
 
@@ -18,14 +18,62 @@
 #define VORTEX_IN_BODY 3
 
 
-typedef struct Vortex
+struct Vortex
 {
     double x, y;
     double vorticity;
 
     int status;
     int generationSide;
-} Vortex;
+
+    bool operator==(const Vortex& a) const
+    {
+        return (x==a.x) && (y==a.y) && (vorticity==a.vorticity);
+    }
+    bool operator!=(const Vortex& a) const
+    {
+        return !(*this == a);
+    }
+};
+
+class VortexInMotion
+{
+    Vortex Object;
+    double ux, uy, tau;
+public:
+    VortexInMotion(Vortex Object, double ux, double uy, double tau)
+    {
+        this->Object = Object;
+        this->ux = ux;
+        this->uy = uy;
+        this->tau = tau;
+    }
+
+    VortexInMotion(Vortex Object, double tau)
+    {
+        this->Object = Object;
+        this->ux = 0.;
+        this->uy = 0.;
+        this->tau = tau;
+    }
+
+    Vortex UpdatedVortex()
+    {
+        Object.x += ux*tau;
+        Object.y += uy*tau;
+        return Object;
+    }
+    void addVelocityByX(double vx)
+    {
+        ux += vx;
+    }
+    void addVelocityByY(double vy)
+    {
+        uy += vy;
+    }
+};
+
+
 
 //ToDo: add method for resumption of calculations
 
@@ -60,10 +108,9 @@ class ViscousVortexDomainSolver
     gsl_permutation *Permutation;
 
     std::vector <Vortex> InFlow;
-    std::vector <Vortex> NextInFlow;
-    std::vector <Vortex> InBodyVortexes;
+    std::vector <VortexInMotion> InFlowEvolution;
 
-    std::mutex NextInFlow_WriteMutex;
+    std::vector <Vortex> InBodyVortexes;
 
     std::vector <StreamLinePoint> StreamLine1;
     std::vector <StreamLinePoint> StreamLine2;
@@ -78,7 +125,7 @@ class ViscousVortexDomainSolver
 
     double Mfield(double x, double y);
 
-    int VortexInBody(double x, double y); //not used (why?)
+    int isVortexInBody(double x, double y); //not used (why?)
 public:
 
     ViscousVortexDomainSolver();
@@ -93,14 +140,13 @@ public:
     void Output_ParaView_AllVortexes(const char *FileName);
     void Output_StreamLines(const char *FileName);
 
-    void Thread_UpdateVortexPosition(int ID, int ThreadNum);
-    static void ThreadCrutch_UpdateVotexPositions(ViscousVortexDomainSolver *Task, int ID, int ThreadNum);
-
 private:
     void UpdateVotexPositions();
+    void ComputeVortexMotion(Vortex Considered);
     void ComputeAssociatedVortexes();
     double UpdateEpsilon(int i, double InitialEpsilon);
-    int LeakageControl(double u_x, int i, double NextY, double u_y, double NextX);
+    double UpdateEpsilon(Vortex Considered, double InitialEpsilon);
+    int LeakageControl(Vortex Checking);
     void AddNewVortexesToFlow();
     double xVelocityAt(double x, double y);
     double yVelocityAt(double x, double y);
