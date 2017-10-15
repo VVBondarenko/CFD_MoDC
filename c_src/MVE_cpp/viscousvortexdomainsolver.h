@@ -8,6 +8,11 @@
 #include <gsl/gsl_linalg.h>
 #include <vector>
 #include <algorithm>
+//#include <parallel/algorithm>
+#include "pstl/execution"
+#include "pstl/algorithm"
+#include "tbb/parallel_for_each.h"
+#include <mutex>
 
 #include <omp.h>
 
@@ -38,9 +43,9 @@ struct Vortex
 
 class VortexInMotion
 {
-    Vortex Object;
     double ux, uy, tau;
 public:
+    Vortex Object;
     VortexInMotion(Vortex Object, double ux, double uy, double tau)
     {
         this->Object = Object;
@@ -109,6 +114,8 @@ class ViscousVortexDomainSolver
 
     std::vector <Vortex> InFlow;
     std::vector <VortexInMotion> InFlowEvolution;
+    std::mutex SyncFlowEvolution;
+
 
     std::vector <Vortex> InBodyVortexes;
 
@@ -144,7 +151,6 @@ private:
     void UpdateVotexPositions();
     void ComputeVortexMotion(Vortex Considered);
     void ComputeAssociatedVortexes();
-    double UpdateEpsilon(int i, double InitialEpsilon);
     double UpdateEpsilon(Vortex Considered, double InitialEpsilon);
     int LeakageControl(Vortex Checking);
     void AddNewVortexesToFlow();
