@@ -2,14 +2,12 @@
 
 ViscousVortexDomainSolver::ViscousVortexDomainSolver()
 {
-    maxEps = 0.;
     NumberOfPanels = 200;
     MaxVortexes = 16500;
     Niterations = 2000;
-    ActiveVortexesInFLow=0;
 
     nu = 1./53.;
-    tau = 0.03;
+    tau = 0.01;
     rho = 1.;
     vx_inf = 3.;
     vy_inf = 0.;
@@ -31,6 +29,7 @@ ViscousVortexDomainSolver::ViscousVortexDomainSolver()
 
     OriginalVortexGenerationMatrix = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
     VortexGenerationMatrix         = gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
+    VortexGenerationMatrix_Inversed= gsl_matrix_alloc(NumberOfPanels+1,NumberOfPanels+1);
 
     VelocityProjections = gsl_vector_alloc(NumberOfPanels+1);
     NewVorticities      = gsl_vector_alloc(NumberOfPanels+1);
@@ -58,31 +57,13 @@ ViscousVortexDomainSolver::~ViscousVortexDomainSolver()
 
     gsl_matrix_free(OriginalVortexGenerationMatrix);
     gsl_matrix_free(VortexGenerationMatrix);
+    gsl_matrix_free(VortexGenerationMatrix_Inversed);
 
     gsl_vector_free(VelocityProjections);
     gsl_vector_free(NewVorticities);
 
     gsl_permutation_free(Permutation);
 
-}
-
-void ViscousVortexDomainSolver::AddNewVortexesToFlow()
-{
-    for(int i=0;i<NumberOfPanels;i++)
-    {
-        Vortex NewVortexFromPanel;
-        NewVortexFromPanel.x = DeployPoints[i][0];
-        NewVortexFromPanel.y = DeployPoints[i][1];
-        NewVortexFromPanel.status = VORTEX_IN_FLOW;
-        NewVortexFromPanel.vorticity = gsl_vector_get(NewVorticities,i);
-        if((2*i)/(NumberOfPanels))
-            NewVortexFromPanel.generationSide = 0;
-        else
-            NewVortexFromPanel.generationSide = 1;
-
-        InFlow.push_back(NewVortexFromPanel);
-    }
-    ActiveVortexesInFLow = InFlow.size();
 }
 
 void ViscousVortexDomainSolver::Solve()
@@ -99,11 +80,11 @@ void ViscousVortexDomainSolver::Solve()
     {
         double f_x = 0., f_y = 0./*, M_z = 0.*/;
 
-        AddNewVortexesToFlow();
+        AppendAssociatedVortexesToFlow();
 
-        printf("active vortexes \t%d,\t iteration\t%d\n",ActiveVortexesInFLow,iterator);
+        printf("active vortexes \t%d,\t iteration\t%d\n",(int)Flow.size(),iterator);
 
-        UpdateStreamLines();
+        StepInTimeForStreamLines();
         UpdateVotexPositions();
 
         for(int m = 0; m < NumberOfPanels; m++)
@@ -169,7 +150,7 @@ void ViscousVortexDomainSolver::DivideProfileToPanels()
 
 void ViscousVortexDomainSolver::CompletingGeneratingMatrix()
 {
-    int i,j;
+    int i,j,k;
     for(i=0; i<NumberOfPanels; i++)
     {
         for(j=0; j<NumberOfPanels; j++)
@@ -190,37 +171,26 @@ void ViscousVortexDomainSolver::CompletingGeneratingMatrix()
     gsl_matrix_set(VortexGenerationMatrix,NumberOfPanels,NumberOfPanels,0);
     gsl_matrix_memcpy(OriginalVortexGenerationMatrix,VortexGenerationMatrix);
 
+    gsl_linalg_LU_decomp(VortexGenerationMatrix,Permutation,&k);
+    gsl_linalg_LU_invert(VortexGenerationMatrix,Permutation,VortexGenerationMatrix_Inversed);
+    gsl_matrix_memcpy(VortexGenerationMatrix, OriginalVortexGenerationMatrix);
+
 }
 
-
-double ViscousVortexDomainSolver::UpdateEpsilon(Vortex Considered, double InitialEpsilon)
+void ViscousVortexDomainSolver::AppendAssociatedVortexesToFlow()
 {
-    if((int)InFlow.size()>NumberOfPanels)
+    for(int i=0;i<NumberOfPanels;i++)
     {
-        double sq1=InitialEpsilon*InitialEpsilon;
-        double sq2=sq1, sq3=sq1;
-        for(Vortex Processing : InFlow)
-        {
-            if(Considered!=Processing)
-            {
-                double temp = (Considered.x-Processing.x)*(Considered.x-Processing.x)
-                             +(Considered.y-Processing.y)*(Considered.y-Processing.y);
-                if(
-                        temp < sq1 &&
-                        Considered.vorticity*Processing.vorticity>0
-                        )
-                {
-                    sq1 = temp;
-                    sq2 = sq1;
-                    sq3 = sq2;
-                }
-            }
-        }
-        InitialEpsilon = sqrt( (sq1+sq2+sq3)/3 );
-    }
-    return InitialEpsilon;
-}
+        Vortex NewVortexFromPanel = Vortex(DeployPoints[i][0],DeployPoints[i][1],gsl_vector_get(NewVorticities,i));
 
+        if((2*i)/(NumberOfPanels))
+            NewVortexFromPanel.deployIdentifier = 0.;
+        else
+            NewVortexFromPanel.deployIdentifier = 1.;
+
+        Flow.push_back(NewVortexFromPanel);
+    }
+}
 
 
 void ViscousVortexDomainSolver::ComputeAssociatedVortexes()
@@ -231,168 +201,61 @@ void ViscousVortexDomainSolver::ComputeAssociatedVortexes()
     for(j=0; j<NumberOfPanels; j++)
         VelocityProjInControlPoint[j] = PanelNorms[j][0]*vx_inf+
                                         PanelNorms[j][1]*vy_inf;
-    if(!InFlow.empty())
-    {
-        for(Vortex Considered : InFlow)
-        {
-            for(j=0; j<NumberOfPanels; j++)
-            {
-                VelocityProjInControlPoint[j] +=
-                        (PanelNorms[j][0]*Qfield_x( PanelMids[j][0]-Considered.x,
-                                                    PanelMids[j][1]-Considered.y )
-                        +PanelNorms[j][1]*Qfield_y( PanelMids[j][0]-Considered.x,
-                                                    PanelMids[j][1]-Considered.y))
-                        *Considered.vorticity;
-            }
-        }
-    }
 
+    //ToDo: think about ways of parallelizing of this part of code (OpenMP, possibly)
+    //This part is obviously parallelizable over j variable
+#pragma omp parallel for private(j)
     for(j=0; j<NumberOfPanels; j++)
+    {
+
+        for(Vortex Considered : Flow)
+        {
+            VelocityProjInControlPoint[j] +=
+                    (PanelNorms[j][0]*Considered.inducedXVelocity(PanelMids[j][0],PanelMids[j][1])
+                    +PanelNorms[j][1]*Considered.inducedYVelocity(PanelMids[j][0],PanelMids[j][1]));
+        }
         gsl_vector_set(VelocityProjections,j,-VelocityProjInControlPoint[j]);
+    }
     gsl_vector_set(VelocityProjections,NumberOfPanels,0);
 
-    gsl_matrix_memcpy(VortexGenerationMatrix, OriginalVortexGenerationMatrix);
-
-    gsl_linalg_LU_decomp(VortexGenerationMatrix,Permutation,&k);
-    gsl_linalg_LU_solve (VortexGenerationMatrix,Permutation,VelocityProjections,NewVorticities);
+    gsl_blas_dgemv (CblasNoTrans, 1., VortexGenerationMatrix_Inversed, VelocityProjections, 0., NewVorticities);
 
 }
 
-double ViscousVortexDomainSolver::xVelocityAt(double x, double y)
-{
-    double vx=vx_inf;
-    for(Vortex Considered : InFlow)
-    {
-        if(hypot(x-Considered.x, y-Considered.y) > sqrt(tau*nu/2.))
-            vx += Considered.vorticity*Qfield_x(x-Considered.x,
-                                                y-Considered.y);
-    }
-
-    return vx;
-}
-
-double ViscousVortexDomainSolver::yVelocityAt(double x, double y)
-{
-    double vy=vy_inf;
-    for(Vortex Considered : InFlow)
-    {
-        if(hypot(x-Considered.x, y-Considered.y) > sqrt(tau*nu/2.))
-            vy += Considered.vorticity*Qfield_y(x-Considered.x,
-                                                y-Considered.y);
-    }
-    return vy;
-}
-
-void ViscousVortexDomainSolver::Output_ParaView_Field_with_exclusions(const char *FileName)
-{
-    int i,j;
-    FILE *VelocityField;
-    VelocityField = fopen(FileName,"w");
-    fprintf(VelocityField,"TITLE = \"Flow Model\"\n");
-    fprintf(VelocityField,"VARIABLES = \"x\", \"y\", \"vx\", \"vy\"\n");
-    fprintf(VelocityField,"ZONE T=\"Frame 0\", I=%d, J=%d\n", 200, 100);
-    for(i=0;i<200;i++)
-    {
-        for(j=0;j<100;j++)
-        {
-            double x = 0.08*i-4,
-                   y = 0.08*j-4;
-            double vx = xVelocityAt(x, y),
-                   vy = yVelocityAt(x, y);
-
-            fprintf(VelocityField,"%f %f %f %f\n",x, y, vx, vy);
-        }
-    }
-    fclose(VelocityField);
-}
-
-void ViscousVortexDomainSolver::Output_ParaView_Field(const char *FileName)
-{
-    int i,j,n;
-    FILE *VelocityField;
-    VelocityField = fopen(FileName,"w");
-    fprintf(VelocityField,"TITLE = \"Flow Model\"\n");
-    fprintf(VelocityField,"VARIABLES = \"x\", \"y\", \"vx\", \"vy\"\n");
-    fprintf(VelocityField,"ZONE T=\"Frame 0\", I=%d, J=%d\n", 200, 100);
-    for(i=0;i<200;i++)
-    {
-        for(j=0;j<100;j++)
-        {
-            double vx=vx_inf, vy=vy_inf;
-            for(n=0;n<(int)InFlow.size();n++)
-            {
-                    vx += InFlow[n].vorticity*Qfield_x((0.08*i-4)-InFlow[n].x,
-                                                       (0.08*j-4)-InFlow[n].y);
-                    vy += InFlow[n].vorticity*Qfield_y((0.08*i-4)-InFlow[n].x,
-                                                       (0.08*j-4)-InFlow[n].y);
-            }
-            fprintf(VelocityField,"%f %f %f %f\n",0.08*i-4, 0.08*j-4, vx, vy);
-        }
-    }
-    fclose(VelocityField);
-}
-
-void ViscousVortexDomainSolver::Output_ParaView_AllVortexes(const char *FileName)
-{
-    int n;
-    FILE *VelocityField;
-    VelocityField = fopen(FileName,"w");
-    fprintf(VelocityField,"X,Y,Z,vorticity,side\n");
-
-    double average = 0.;
-    for(n=0;n<(int)InFlow.size();n++)
-        average += InFlow[n].vorticity*InFlow[n].vorticity;
-    average = sqrt(average)/((double)((int)InFlow.size()));
-
-    for(n=0;n<(int)InFlow.size();n++)
-    {
-        if(fabs(fabs(InFlow[n].vorticity)-average)/average > 0.9 )
-            fprintf(VelocityField,"%f,%f,%f,%f,%f\n",InFlow[n].x,InFlow[n].y,0.,
-                                                     InFlow[n].vorticity, (double)InFlow[n].generationSide);
-
-    }
-    fclose(VelocityField);
-}
 
 
 void ViscousVortexDomainSolver::UpdateVotexPositions()
 {
-    InFlowEvolution.clear();
-    InFlowEvolution.reserve(InFlow.size());
+    FlowEvolution.clear();
+    FlowEvolution.reserve(Flow.size());
 
-    /*__gnu_parallel*/
-//    std::for_each
     tbb::parallel_for_each
-            (InFlow.begin(),InFlow.end(),[this](Vortex Considered)
+            (Flow.begin(),Flow.end(),[this](Vortex& Considered)
     {
         ComputeVortexMotion(Considered);
     });
 
 
     tbb::parallel_for_each
-            (InFlowEvolution.begin(), InFlowEvolution.end(),
-             [this](VortexInMotion i)
+            (FlowEvolution.begin(), FlowEvolution.end(),
+             [this](VortexMotion i)
     {
-        for(auto &j : InFlow)
-            if(j==i.Object)
-                j = i.UpdatedVortex();
+        i.UpdatedVortex();
     }
     );
 
-
-    std::vector <Vortex> TemporaryFlow;
-    TemporaryFlow.reserve(InFlow.size());
-    for(Vortex i : InFlow)
-    {
-        if(LeakageControl(i) == VORTEX_IN_FLOW)
-            TemporaryFlow.push_back(i);
-        else
-            InBodyVortexes.push_back(i);
-    }
-    InFlow = TemporaryFlow;
+    //ToDo: modify to consider in body vortexes
+    Flow.erase(
+                std::remove_if(Flow.begin(),
+                               Flow.end(),
+                               [this](Vortex Considered)
+                {
+                     return LeakageControl(Considered)!=VORTEX_IN_FLOW;
+                }),
+                Flow.end());
 }
 
-void ViscousVortexDomainSolver::ComputeVortexMotion(Vortex Considered)
+void ViscousVortexDomainSolver::ComputeVortexMotion(Vortex& Considered)
 {
     double eps = sqrt(tau*nu/2.);
     double  I0 = 0.,
@@ -409,20 +272,17 @@ void ViscousVortexDomainSolver::ComputeVortexMotion(Vortex Considered)
 
 
     //Vortex-vortex interaction
-    for(Vortex Processing : InFlow)
+    //  (already implemented somewhere else... possibly, should be replaced. Но это не точно)
+    for(Vortex Processing : Flow)
     {
-        double rx = Considered.x-Processing.x;
-        double ry = Considered.y-Processing.y;
         if( Considered!=Processing )
         {
-            u_x += Processing.vorticity*Qfield_x(rx,ry);
-            u_y += Processing.vorticity*Qfield_y(rx,ry);
+            u_x += Processing.inducedXVelocity(Considered.x,Considered.y);
+            u_y += Processing.inducedYVelocity(Considered.x,Considered.y);
         }
     }
-    //^^^^^^^
-    //checked
 
-    for(Vortex Processing : InFlow)
+    for(Vortex Processing : Flow)
     {
         double rx = (Considered.x-Processing.x)/eps;
         double ry = (Considered.y-Processing.y)/eps;
@@ -484,8 +344,37 @@ void ViscousVortexDomainSolver::ComputeVortexMotion(Vortex Considered)
     u_y += nu*(-I2_y/I1+I3_y/I0);
 
     SyncFlowEvolution.lock();
-    InFlowEvolution.push_back(VortexInMotion(Considered,u_x,u_y,tau));
+    FlowEvolution.push_back(VortexMotion(Considered,u_x,u_y,tau));
     SyncFlowEvolution.unlock();
+}
+
+
+double ViscousVortexDomainSolver::UpdateEpsilon(Vortex Considered, double InitialEpsilon)
+{
+    if((int)Flow.size()>NumberOfPanels)
+    {
+        double sq1=InitialEpsilon*InitialEpsilon;
+        double sq2=sq1, sq3=sq1;
+        for(Vortex Processing : Flow)
+        {
+            if(Considered!=Processing)
+            {
+                double temp = (Considered.x-Processing.x)*(Considered.x-Processing.x)
+                             +(Considered.y-Processing.y)*(Considered.y-Processing.y);
+                if(
+                        temp < sq1 //&&
+//                        Considered.vorticity*Processing.vorticity>0
+                        )
+                {
+                    sq1 = temp;
+                    sq2 = sq1;
+                    sq3 = sq2;
+                }
+            }
+        }
+        InitialEpsilon = sqrt( (sq1+sq2+sq3)/3 );
+    }
+    return InitialEpsilon;
 }
 
 
@@ -505,34 +394,136 @@ int ViscousVortexDomainSolver::LeakageControl(Vortex Checking)
 }
 
 
-void ViscousVortexDomainSolver::UpdateStreamLines()
+int ViscousVortexDomainSolver::isVortexInBody(double x, double y)
+{
+    if(x*x+y*y<1)
+        return 0;
+    else
+        return 1;
+}
+
+
+double ViscousVortexDomainSolver::xVelocityAt(double x, double y)
+{
+    double vx=vx_inf;
+    for(Vortex Considered : Flow)
+        vx += Considered.inducedXVelocity(x,y);
+
+    return vx;
+}
+
+double ViscousVortexDomainSolver::yVelocityAt(double x, double y)
+{
+    double vy=vy_inf;
+    for(Vortex Considered : Flow)
+        vy += Considered.inducedYVelocity(x,y);
+
+    return vy;
+}
+
+void ViscousVortexDomainSolver::Output_ParaView_Field_with_exclusions(const char *FileName)
+{
+    int i,j;
+    FILE *VelocityField;
+    VelocityField = fopen(FileName,"w");
+    fprintf(VelocityField,"TITLE = \"Flow Model\"\n");
+    fprintf(VelocityField,"VARIABLES = \"x\", \"y\", \"vx\", \"vy\"\n");
+    fprintf(VelocityField,"ZONE T=\"Frame 0\", I=%d, J=%d\n", 200, 100);
+    for(i=0;i<200;i++)
+    {
+        for(j=0;j<100;j++)
+        {
+            double x = 0.08*i-4,
+                   y = 0.08*j-4;
+            double vx = xVelocityAt(x, y),
+                   vy = yVelocityAt(x, y);
+
+            fprintf(VelocityField,"%f %f %f %f\n",x, y, vx, vy);
+        }
+    }
+    fclose(VelocityField);
+}
+
+void ViscousVortexDomainSolver::Output_ParaView_Field(const char *FileName)
+{
+    int i,j,n;
+    FILE *VelocityField;
+    VelocityField = fopen(FileName,"w");
+    fprintf(VelocityField,"TITLE = \"Flow Model\"\n");
+    fprintf(VelocityField,"VARIABLES = \"x\", \"y\", \"vx\", \"vy\"\n");
+    fprintf(VelocityField,"ZONE T=\"Frame 0\", I=%d, J=%d\n", 200, 100);
+    for(i=0;i<200;i++)
+    {
+        for(j=0;j<100;j++)
+        {
+            double vx=vx_inf, vy=vy_inf;
+            for(n=0;n<(int)Flow.size();n++)
+            {
+                    vx += Flow[n].vorticity*Qfield_x((0.08*i-4)-Flow[n].x,
+                                                       (0.08*j-4)-Flow[n].y);
+                    vy += Flow[n].vorticity*Qfield_y((0.08*i-4)-Flow[n].x,
+                                                       (0.08*j-4)-Flow[n].y);
+            }
+            fprintf(VelocityField,"%f %f %f %f\n",0.08*i-4, 0.08*j-4, vx, vy);
+        }
+    }
+    fclose(VelocityField);
+}
+
+void ViscousVortexDomainSolver::Output_ParaView_AllVortexes(const char *FileName)
+{
+    int n;
+    FILE *VelocityField;
+    VelocityField = fopen(FileName,"w");
+    fprintf(VelocityField,"X,Y,Z,vorticity,side\n");
+
+    double average = 0.;
+    for(n=0;n<(int)Flow.size();n++)
+        average += Flow[n].vorticity*Flow[n].vorticity;
+    average = sqrt(average)/((double)((int)Flow.size()));
+
+    for(n=0;n<(int)Flow.size();n++)
+    {
+        if(fabs(fabs(Flow[n].vorticity)-average)/average > 0.9 )
+            fprintf(VelocityField,"%f,%f,%f,%f,%f\n",Flow[n].x,Flow[n].y,0.,
+                                                     Flow[n].vorticity, (double)Flow[n].deployIdentifier);
+
+    }
+    fclose(VelocityField);
+}
+
+
+
+void ViscousVortexDomainSolver::UpdateControlPointsOfStreamLine(std::vector <ControlPointOfFlow> &StreamLine)
+{
+    tbb::parallel_for_each
+            (StreamLine.begin(),StreamLine.end(),[this](ControlPointOfFlow &UpdatingPoint)
+    {
+        MoveSingleControlPoint(UpdatingPoint);
+    });
+}
+
+void ViscousVortexDomainSolver::MoveSingleControlPoint(ControlPointOfFlow &UpdatingPoint)
+{
+    ControlPointOfFlow PredictionPoint = UpdatingPoint;
+    PredictionPoint.move(tau*xVelocityAt(UpdatingPoint.x,UpdatingPoint.y),
+                         tau*yVelocityAt(UpdatingPoint.x,UpdatingPoint.y));
+    UpdatingPoint.move(0.5*tau*(xVelocityAt(UpdatingPoint.x,UpdatingPoint.y)+
+                                xVelocityAt(PredictionPoint.x,PredictionPoint.y)),
+                       0.5*tau*(yVelocityAt(UpdatingPoint.x,UpdatingPoint.y)+
+                                yVelocityAt(PredictionPoint.x,PredictionPoint.y)));
+}
+
+void ViscousVortexDomainSolver::StepInTimeForStreamLines()
 {
     //ToDo: move to exernal program
-    StreamLinePoint NewPoint1 = StreamLinePoint(0., 1.1);
-    StreamLinePoint NewPoint2 = StreamLinePoint(0.,-1.1);
+    ControlPointOfFlow NewPoint1 = ControlPointOfFlow(0.,-1.1);
+    ControlPointOfFlow NewPoint2 = ControlPointOfFlow(0., 1.1);
 
-    std::vector <StreamLinePoint>  FirstStreamLineTemp = StreamLine1;
-    std::vector <StreamLinePoint> SecondStreamLineTemp = StreamLine2;
 
-    for(unsigned i = 0; i < StreamLine1.size(); i++)
-    {
-        FirstStreamLineTemp[i].move(tau*xVelocityAt(StreamLine1[i].x,StreamLine1[i].y),
-                                    tau*yVelocityAt(StreamLine1[i].x,StreamLine1[i].y));
-        StreamLine1[i].move(0.5*tau*(xVelocityAt(StreamLine1[i].x,StreamLine1[i].y)
-                                    +xVelocityAt(FirstStreamLineTemp[i].x,FirstStreamLineTemp[i].y)),
-                            0.5*tau*(yVelocityAt(StreamLine1[i].x,StreamLine1[i].y)
-                                    +yVelocityAt(FirstStreamLineTemp[i].x,FirstStreamLineTemp[i].y)));
-    }
+    UpdateControlPointsOfStreamLine(StreamLine1);
+    UpdateControlPointsOfStreamLine(StreamLine2);
 
-    for(unsigned i = 0; i < StreamLine2.size(); i++)
-    {
-        SecondStreamLineTemp[i].move(tau*xVelocityAt(StreamLine2[i].x,StreamLine2[i].y),
-                                     tau*yVelocityAt(StreamLine2[i].x,StreamLine2[i].y));
-        StreamLine2[i].move(0.5*tau*(xVelocityAt(StreamLine2[i].x,StreamLine2[i].y)+
-                                     xVelocityAt(SecondStreamLineTemp[i].x,SecondStreamLineTemp[i].y)),
-                            0.5*tau*(yVelocityAt(StreamLine2[i].x,StreamLine2[i].y)+
-                                     yVelocityAt(SecondStreamLineTemp[i].x,SecondStreamLineTemp[i].y)));
-    }
 
     StreamLine1.push_back(NewPoint1);
     StreamLine2.push_back(NewPoint2);
@@ -544,56 +535,10 @@ void ViscousVortexDomainSolver::Output_StreamLines(const char *FileName)
     ControlPoints = fopen(FileName,"w");
     fprintf(ControlPoints,"X,Y,Z,side\n");
 
-    for(StreamLinePoint i : StreamLine1)
+    for(ControlPointOfFlow i : StreamLine1)
         fprintf(ControlPoints, "%f,%f,%f,%f\n", i.x, i.y, 0., 0.);
 
-    for(StreamLinePoint i : StreamLine2)
+    for(ControlPointOfFlow i : StreamLine2)
         fprintf(ControlPoints, "%f,%f,%f,%f\n", i.x, i.y, 0., 1.);
     fclose(ControlPoints);
-}
-
-double ViscousVortexDomainSolver::Qfield_x(double x, double y)
-{
-    double r = x*x+y*y;
-//    return -y/(2*M_PI*fmax(r,1/1024/1024));
-    return -y/(2.*M_PI*(r+0.0001*0.0001));
-}
-
-double ViscousVortexDomainSolver::Qfield_y(double x, double y)
-{
-    double r = x*x+y*y;
-    return  x/(2.*M_PI*(r+0.0001*0.0001));
-}
-
-double ViscousVortexDomainSolver::Pfield_x(double x, double y)
-{
-    double r = hypot(x,y);
-    if(r == 0)
-        return 1.;
-    return x/r*exp(-r);
-}
-
-double ViscousVortexDomainSolver::Pfield_y(double x, double y)
-{
-    double r = hypot(x,y);
-    if(r == 0)
-        return 1.;
-    return y/r*exp(-r);
-}
-
-double ViscousVortexDomainSolver::Mfield(double x, double y)
-{
-    double r2= x*x+y*y;
-    double r = sqrt(r2);
-    if(x==0 && y==0)
-        return 0.;
-    return (r+1.)*exp(-r)/r2;
-}
-
-int ViscousVortexDomainSolver::isVortexInBody(double x, double y)
-{
-    if(x*x+y*y<1)
-        return 0;
-    else
-        return 1;
 }
