@@ -18,84 +18,8 @@
 #include <omp.h>
 
 #include <streamline.h>
-
-#define VORTEX_IN_FLOW 1
-#define VORTEX_OUT_OF_RANGE 2
-#define VORTEX_IN_BODY 3
-
-
-class Vortex
-{
-public:
-    Vortex(double X, double Y, double Vorticity)
-    {
-        this->x = X;
-        this->y = Y;
-        this->vorticity = Vorticity;
-    }
-    double x, y;
-    double vorticity;
-
-    double deployIdentifier;
-
-    bool operator==(const Vortex& a) const
-    {
-        return (x==a.x) && (y==a.y) && (vorticity==a.vorticity);
-    }
-    bool operator!=(const Vortex& a) const
-    {
-        return !(*this == a);
-    }
-
-    double inducedXVelocity(double x, double y)
-    {
-        return vorticity*Qfield_x(x-this->x, y-this->y);
-    }
-
-    double inducedYVelocity(double x, double y)
-    {
-        return vorticity*Qfield_y(x-this->x, y-this->y);
-    }
-
-};
-
-class VortexMotion
-{
-    double ux, uy, tau;
-public:
-    Vortex* MovingVortex;
-    VortexMotion(Vortex& Object, double ux, double uy, double tau)
-    {
-        this->MovingVortex = &Object;
-        this->ux = ux;
-        this->uy = uy;
-        this->tau = tau;
-    }
-
-    VortexMotion(Vortex& Object, double tau)
-    {
-        this->MovingVortex = &Object;
-        this->ux = 0.;
-        this->uy = 0.;
-        this->tau = tau;
-    }
-
-    void UpdatedVortex()
-    {
-        (*MovingVortex).x += ux*tau;
-        (*MovingVortex).y += uy*tau;
-    }
-    void addVelocityByX(double vx)
-    {
-        ux += vx;
-    }
-    void addVelocityByY(double vy)
-    {
-        uy += vy;
-    }
-};
-
-
+#include <vortex.h>
+#include <vortexmotion.h>
 
 //ToDo: add resumption of calculations mechanism
 class ViscousVortexDomainSolver
