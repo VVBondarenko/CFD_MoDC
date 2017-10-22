@@ -6,7 +6,7 @@ ViscousVortexDomainSolver::ViscousVortexDomainSolver()
     MaxVortexes = 16500;
     Niterations = 2000;
 
-    nu = 1./53.;
+    nu = 1./5.;
     tau = 0.01;
     rho = 1.;
     vx_inf = 3.;
@@ -84,8 +84,15 @@ void ViscousVortexDomainSolver::Solve()
 
         printf("active vortexes \t%d,\t iteration\t%d\n",(int)Flow.size(),iterator);
 
-        StepInTimeForStreamLines();
         UpdateVotexPositions();
+        if(iterator > 50)
+        {
+            StepInTimeForStreamLines();
+            char FileName[32];
+            sprintf(FileName,"ControlPoints%6.6d.csv",iterator);
+            Output_StreamLines(FileName);
+        }
+
 
         for(int m = 0; m < NumberOfPanels; m++)
         {
@@ -96,7 +103,7 @@ void ViscousVortexDomainSolver::Solve()
 
         ComputeAssociatedVortexes();
 
-        if(iterator%3==0 || 1)
+        if(iterator > 50)
         {
             char FileName[32];
             sprintf(FileName,"ControlPoints%6.6d.csv",iterator);
